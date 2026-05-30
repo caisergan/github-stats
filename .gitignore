@@ -1,0 +1,9 @@
+/github-stats
+/bin/
+*.db
+*.db-wal
+*.db-shm
+.env
+/web/node_modules/
+/web/dist/*
+!/web/dist/index.html

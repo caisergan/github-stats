@@ -173,6 +173,26 @@ time-series; ECharts optional for richer chart types.
   lists · "Refresh now" with live SSE progress.
 - **URL shortcut** `/owner/repo` → repo detail (the GithubTracker nicety).
 
+### Serving model (dev vs prod)
+
+The React SPA is always a **decoupled client** that talks to the Go backend purely over the
+HTTP/JSON API — `embed.FS` is a *packaging/serving* choice, not an architectural coupling. The
+same API boundary holds in both environments; only **who serves the static bundle** differs.
+
+- **Development**: Vite dev server runs on its own port with HMR; it **proxies `/api` → the Go
+  backend** (`server.proxy` in `vite.config.ts`). Two processes, instant frontend feedback, no
+  Go rebuild on UI changes. Fully decoupled DX.
+- **Production**: `npm run build` → the emitted `dist/` is embedded via `go:embed` → `go build`
+  produces a **single binary** that serves both `/api/*` (JSON) and `/` + `/assets/*` (the SPA).
+  Build pipeline order (Makefile/Taskfile): build frontend → embed → build Go.
+
+**Why embed for self-hosted**: one artifact to ship and run (no Node runtime in prod), **same
+origin → no CORS**, httpOnly session cookies work cleanly, and frontend/backend versions can
+never skew. This is the standard Go-single-binary pattern (Gitea, Grafana, Syncthing). The
+separate-host model (UI on a CDN/Vercel, API elsewhere) is only worth its CORS + dual-deploy
+cost at SaaS/CDN scale, which is out of scope — so it is **not** used here. A SPA-fallback route
+serves `index.html` for client-side routes (e.g. `/owner/repo`) while `/api/*` is handled first.
+
 ## 9. Auth & token handling
 
 GitHub OAuth Authorization-Code flow. Minimal scopes by default (`read:user` + `public_repo`),

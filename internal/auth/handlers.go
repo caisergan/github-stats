@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 	"strings"
@@ -11,25 +12,37 @@ import (
 
 const stateCookie = "gs_oauth_state"
 
-func randomToken() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+func randomToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
-func (s *Service) secureCookies() bool {
+func (s *Service) secureCookies(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return true
+	}
 	return strings.HasPrefix(s.Cfg.BaseURL, "https://")
 }
 
 // Login starts the OAuth flow: set a state cookie and redirect to GitHub.
 func (s *Service) Login(w http.ResponseWriter, r *http.Request) {
-	state := randomToken()
+	state, err := randomToken()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     stateCookie,
 		Value:    state,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   s.secureCookies(),
+		Secure:   s.secureCookies(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   600,
 	})
@@ -40,7 +53,7 @@ func (s *Service) Login(w http.ResponseWriter, r *http.Request) {
 func (s *Service) Callback(w http.ResponseWriter, r *http.Request) {
 	stateParam := r.URL.Query().Get("state")
 	c, err := r.Cookie(stateCookie)
-	if err != nil || stateParam == "" || c.Value != stateParam {
+	if err != nil || stateParam == "" || subtle.ConstantTimeCompare([]byte(c.Value), []byte(stateParam)) != 1 {
 		http.Error(w, "invalid oauth state", http.StatusBadRequest)
 		return
 	}
@@ -89,7 +102,7 @@ func (s *Service) Callback(w http.ResponseWriter, r *http.Request) {
 		Value:    sess.ID,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   s.secureCookies(),
+		Secure:   s.secureCookies(r),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  sess.ExpiresAt,
 	})

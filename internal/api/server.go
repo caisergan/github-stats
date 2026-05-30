@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -40,7 +41,15 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service) *Serve
 	})
 
 	// Embedded SPA (must be last; serves everything else).
-	r.NotFound(web.Handler().ServeHTTP)
+	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/api/") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
+			return
+		}
+		web.Handler().ServeHTTP(w, req)
+	})
 
 	s.router = r
 	return s

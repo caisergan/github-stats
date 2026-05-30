@@ -60,6 +60,18 @@ func TestMeReturnsUser(t *testing.T) {
 	}
 }
 
+func TestUnknownAPIRouteReturnsJSON404(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/does-not-exist", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("content-type = %q, want application/json", ct)
+	}
+}
+
 func TestSPAFallbackServesIndex(t *testing.T) {
 	srv, _ := testServer(t)
 	rec := httptest.NewRecorder()

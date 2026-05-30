@@ -32,6 +32,29 @@ func TestLoginRedirectsWithStateCookie(t *testing.T) {
 	}
 }
 
+func TestLoginSecureCookieFromForwardedProto(t *testing.T) {
+	svc := testService(t)
+	svc.OAuth = &OAuthClient{ClientID: "cid", RedirectURL: "http://app/cb", OAuthBaseURL: "https://github.com"}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/github", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	svc.Login(rec, req)
+
+	var found bool
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == stateCookie {
+			found = true
+			if !c.Secure {
+				t.Fatalf("state cookie Secure = false, want true for X-Forwarded-Proto: https")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("state cookie not set")
+	}
+}
+
 func TestCallbackCreatesUserAndSession(t *testing.T) {
 	svc := testService(t)
 

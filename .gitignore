@@ -7,3 +7,5 @@
 /web/node_modules/
 /web/dist/*
 !/web/dist/index.html
+/web/*.tsbuildinfo
+/web/vite.config.d.ts

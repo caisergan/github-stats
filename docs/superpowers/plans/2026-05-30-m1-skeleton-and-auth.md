@@ -94,6 +94,8 @@ require (
 /web/node_modules/
 /web/dist/*
 !/web/dist/index.html
+/web/*.tsbuildinfo
+/web/vite.config.d.ts
 ```
 
 - [ ] **Step 3: Create `.env.example`**
@@ -2101,11 +2103,15 @@ git commit -m "feat: wire server entrypoint"
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "strict": true,
-    "noEmit": true
+    "emitDeclarationOnly": true
   },
   "include": ["vite.config.ts"]
 }
 ```
+
+> Note: a `composite: true` project cannot also set `noEmit: true` under `tsc -b`
+> (TS6310). Use `emitDeclarationOnly: true`; the emitted `*.tsbuildinfo` /
+> `vite.config.d.ts` are gitignored (see Task 1's `.gitignore`).
 
 - [ ] **Step 3: Create `web/vite.config.ts` with the dev proxy**
 

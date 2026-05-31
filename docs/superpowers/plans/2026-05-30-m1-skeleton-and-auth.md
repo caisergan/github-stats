@@ -47,9 +47,8 @@ github-stats/
 │   │   └── middleware_test.go
 │   └── api/
 │       ├── server.go               # Chi router, route mounting, static serving
-│       ├── server_test.go
 │       ├── me.go                   # GET /api/me
-│       └── me_test.go
+│       └── me_test.go              # /api/me + server/SPA-fallback + /api 404 tests
 └── web/
     ├── embed.go                    # //go:embed dist + SPA-fallback Handler
     ├── package.json
@@ -94,6 +93,8 @@ require (
 /web/node_modules/
 /web/dist/*
 !/web/dist/index.html
+/web/*.tsbuildinfo
+/web/vite.config.d.ts
 ```
 
 - [ ] **Step 3: Create `.env.example`**
@@ -1726,7 +1727,7 @@ git commit -m "feat: oauth login/callback/logout handlers"
 ## Task 11: Embedded static handler + API server + /api/me
 
 **Files:**
-- Create: `web/embed.go`, `web/dist/index.html` (placeholder), `internal/api/server.go`, `internal/api/server_test.go`, `internal/api/me.go`, `internal/api/me_test.go`
+- Create: `web/embed.go`, `web/dist/index.html` (placeholder), `internal/api/server.go`, `internal/api/me.go`, `internal/api/me_test.go` (server/SPA-fallback tests live here alongside the `/api/me` tests)
 
 - [ ] **Step 1: Create the placeholder build output so the package compiles**
 
@@ -2101,11 +2102,15 @@ git commit -m "feat: wire server entrypoint"
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "strict": true,
-    "noEmit": true
+    "emitDeclarationOnly": true
   },
   "include": ["vite.config.ts"]
 }
 ```
+
+> Note: a `composite: true` project cannot also set `noEmit: true` under `tsc -b`
+> (TS6310). Use `emitDeclarationOnly: true`; the emitted `*.tsbuildinfo` /
+> `vite.config.d.ts` are gitignored (see Task 1's `.gitignore`).
 
 - [ ] **Step 3: Create `web/vite.config.ts` with the dev proxy**
 
@@ -2304,3 +2309,18 @@ git commit -m "docs: add setup and self-host instructions"
 ## What M2 will add (next plan)
 
 Collector (`githubapi`: GraphQL+REST, ETag conditional transport, dual rate-limit budget manager), the event/aggregate schema (`0002_*.sql`: repos, commits, pull_requests, issues, releases, daily_repo_stats, daily_contributor_stats, sync_jobs, sync_state, etags), and an end-to-end single-repo backfill writing daily aggregates.
+
+## Post-review hardening (applied after milestone review)
+
+Commit `fix: M1 security hardening (csrf entropy, secure-cookie, /api 404, env key)`:
+1. `randomToken()` propagates the `crypto/rand` error and uses 32 bytes (was silently using an all-zero state token on entropy failure — the sole OAuth-callback CSRF defense).
+2. `secureCookies(r)` derives the cookie `Secure` flag from `r.TLS` / `X-Forwarded-Proto` (falling back to the `BaseURL` scheme) instead of trusting only `BaseURL`.
+3. Unknown `/api/*` paths return a JSON 404 (`{"error":"not found"}`) instead of the SPA HTML shell.
+4. `.env.example` ships an empty `ENCRYPTION_KEY` so startup fails loudly rather than encrypting tokens under a public all-zero key.
+5. Constant-time OAuth state comparison via `crypto/subtle`.
+
+## Deferred review items (carry into later milestones)
+
+- **M2**: verify/normalize the OAuth granted scope at exchange time; introduce a typed JSON response + shared `writeJSON` helper before handlers multiply; adopt `RETURNING id` and explicit (`errors.Is(sql.ErrNoRows)`) migration-runner error handling when `0002_*.sql` lands.
+- **M3/M6**: session revocation ("log out everywhere" via `DeleteSessionsForUser`, the `idx_sessions_user` index already exists), idle/shorter TTL, and a periodic expired-session sweep.
+- **M6 hardening**: GET→POST logout with a CSRF token.

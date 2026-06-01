@@ -1,19 +1,200 @@
 package api
 
-import "net/http"
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
 
+	"github.com/go-chi/chi/v5"
+
+	"github-stats/internal/auth"
+	"github-stats/internal/githubapi"
+	"github-stats/internal/store"
+)
+
+// repoJSON is the wire shape for a tracked repo (M4/M5 depend on these keys).
+type repoJSON struct {
+	ID            int64   `json:"id"`
+	FullName      string  `json:"full_name"`
+	IsPrivate     bool    `json:"is_private"`
+	DefaultBranch string  `json:"default_branch"`
+	Description   string  `json:"description"`
+	Stargazers    int64   `json:"stargazers"`
+	Forks         int64   `json:"forks"`
+	SyncStatus    string  `json:"sync_status"`
+	LastSyncedAt  *string `json:"last_synced_at"`
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// userClient mints a per-user GitHub client from the caller's decrypted oauth token.
+func (s *Server) userClient(r *http.Request, userID int64) (*githubapi.Client, error) {
+	cred, err := s.store.GetCredential(r.Context(), userID, "oauth")
+	if err != nil {
+		return nil, err
+	}
+	token, err := s.cipher.Decrypt(cred.EncToken)
+	if err != nil {
+		return nil, err
+	}
+	return githubapi.NewClient(githubapi.Options{
+		Token:       string(token),
+		GraphQLURL:  s.cfg.GitHubAPIBaseURL + "/graphql",
+		RESTBaseURL: s.cfg.GitHubAPIBaseURL,
+		Store:       s.store,
+	}), nil
+}
+
+// addRepo handles POST /api/repos: fetch meta with the caller's token, upsert,
+// track, and enqueue a backfill job.
 func (s *Server) addRepo(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	u, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		FullName string `json:"full_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	owner, name := splitFullName(body.FullName)
+	if owner == "" || name == "" {
+		http.Error(w, "full_name must be owner/name", http.StatusBadRequest)
+		return
+	}
+
+	client, err := s.userClient(r, u.ID)
+	if err != nil {
+		http.Error(w, "no github credential", http.StatusBadGateway)
+		return
+	}
+	meta, err := client.FetchRepoMeta(r.Context(), owner, name)
+	if err != nil {
+		http.Error(w, "fetch repo failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	repoID, err := s.store.UpsertRepo(r.Context(), meta)
+	if err != nil {
+		http.Error(w, "persist repo failed", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.TrackRepo(r.Context(), u.ID, repoID); err != nil {
+		http.Error(w, "track failed", http.StatusInternalServerError)
+		return
+	}
+	if _, err := s.engine.TriggerBackfill(r.Context(), repoID); err != nil {
+		http.Error(w, "enqueue failed", http.StatusInternalServerError)
+		return
+	}
+
+	ss, _ := s.store.GetSyncState(r.Context(), repoID)
+	writeJSON(w, http.StatusCreated, toRepoJSON(meta, repoID, ss))
 }
 
+// listRepos handles GET /api/repos: the caller's tracked repos with sync status.
 func (s *Server) listRepos(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	u, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	repos, err := s.store.ListTrackedRepos(r.Context(), u.ID)
+	if err != nil {
+		http.Error(w, "list failed", http.StatusInternalServerError)
+		return
+	}
+	out := make([]repoJSON, 0, len(repos))
+	for i := range repos {
+		ss, _ := s.store.GetSyncState(r.Context(), repos[i].ID)
+		out = append(out, toRepoJSON(&repos[i], repos[i].ID, ss))
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
+// untrackRepo handles DELETE /api/repos/{id}.
 func (s *Server) untrackRepo(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	u, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	repoID, err := repoIDParam(r)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.UntrackRepo(r.Context(), u.ID, repoID); err != nil {
+		http.Error(w, "untrack failed", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
+// refreshRepo handles POST /api/repos/{id}/refresh: enqueue a delta job.
 func (s *Server) refreshRepo(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	u, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	repoID, err := repoIDParam(r)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	tracked, err := s.store.IsTracked(r.Context(), u.ID, repoID)
+	if err != nil {
+		http.Error(w, "lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if !tracked {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if _, err := s.engine.TriggerDelta(r.Context(), repoID); err != nil {
+		http.Error(w, "enqueue failed", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func repoIDParam(r *http.Request) (int64, error) {
+	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+}
+
+func toRepoJSON(repo *store.Repo, repoID int64, ss *store.SyncState) repoJSON {
+	j := repoJSON{
+		ID:            repoID,
+		FullName:      repo.FullName,
+		IsPrivate:     repo.IsPrivate,
+		DefaultBranch: repo.DefaultBranch,
+		Description:   repo.Description,
+		Stargazers:    repo.Stargazers,
+		Forks:         repo.Forks,
+	}
+	if ss != nil {
+		j.SyncStatus = ss.Status
+		if ss.LastBackfillAt != nil {
+			formatted := ss.LastBackfillAt.UTC().Format("2006-01-02T15:04:05Z07:00")
+			j.LastSyncedAt = &formatted
+		}
+	}
+	return j
+}
+
+// splitFullName splits "owner/name" into its parts.
+func splitFullName(fullName string) (owner, name string) {
+	for i := 0; i < len(fullName); i++ {
+		if fullName[i] == '/' {
+			return fullName[:i], fullName[i+1:]
+		}
+	}
+	return fullName, ""
 }

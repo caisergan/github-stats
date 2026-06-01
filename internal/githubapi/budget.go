@@ -1,6 +1,7 @@
 package githubapi
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -12,6 +13,22 @@ type RateLimit struct {
 	Cost      int    `json:"cost"`
 	Remaining int    `json:"remaining"`
 	ResetAt   string `json:"resetAt"` // RFC3339
+}
+
+// RateLimitError signals that a request was refused because a rate-limit bucket
+// is exhausted. Reset is when the bucket refills (zero if unknown). Callers
+// (e.g. the sync engine) match it with errors.As to reschedule the job at Reset
+// instead of counting a failed attempt.
+type RateLimitError struct {
+	Resource string    // "graphql" | "rest"
+	Reset    time.Time // when the bucket refills
+}
+
+func (e *RateLimitError) Error() string {
+	if e.Reset.IsZero() {
+		return fmt.Sprintf("%s rate limit exhausted", e.Resource)
+	}
+	return fmt.Sprintf("%s rate limit exhausted; resets at %s", e.Resource, e.Reset.UTC().Format(time.RFC3339))
 }
 
 // defaultBackoff is the minimum wait applied to a secondary-limit response that

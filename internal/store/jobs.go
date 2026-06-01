@@ -12,7 +12,6 @@ type SyncJob struct {
 	RepoID      int64
 	Kind        string // "backfill" | "delta"
 	Status      string // "pending" | "running" | "done" | "error"
-	CursorState string
 	Attempts    int
 	NextRunAt   time.Time
 	LockedAt    *time.Time
@@ -56,7 +55,7 @@ func (s *Store) LeaseNextJob(ctx context.Context, now time.Time) (*SyncJob, erro
 			ORDER BY next_run_at ASC, id ASC
 			LIMIT 1
 		)
-		RETURNING id, repo_id, kind, status, cursor_state, attempts,
+		RETURNING id, repo_id, kind, status, attempts,
 			next_run_at, locked_at, last_error, created_at`,
 		nowUTC, nowUTC,
 	)
@@ -71,7 +70,7 @@ func (s *Store) LeaseNextJob(ctx context.Context, now time.Time) (*SyncJob, erro
 }
 
 // CompleteJob marks a job done.
-func (s *Store) CompleteJob(ctx context.Context, id int64, now time.Time) error {
+func (s *Store) CompleteJob(ctx context.Context, id int64) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE sync_jobs SET status = 'done', locked_at = NULL WHERE id = ?`, id)
 	return err
@@ -132,12 +131,40 @@ func (s *Store) ListJobsForRepo(ctx context.Context, repoID int64) ([]SyncJob, e
 	return jobs, rows.Err()
 }
 
-const jobSelect = `SELECT id, repo_id, kind, status, cursor_state, attempts,
+// HasOpenJob reports whether a repo has a pending or running job. It is a cheap
+// EXISTS probe so the scheduler does not load a repo's whole job history just to
+// avoid piling duplicate jobs.
+func (s *Store) HasOpenJob(ctx context.Context, repoID int64) (bool, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM sync_jobs
+			WHERE repo_id = ? AND status IN ('pending', 'running')
+		)`, repoID).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+// PruneTerminalJobs deletes done/error jobs created before `before`, bounding
+// the unbounded growth of sync_jobs. It returns the number of rows removed.
+func (s *Store) PruneTerminalJobs(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.DB.ExecContext(ctx, `
+		DELETE FROM sync_jobs
+		WHERE status IN ('done', 'error') AND created_at < ?`, before.UTC())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+const jobSelect = `SELECT id, repo_id, kind, status, attempts,
 	next_run_at, locked_at, last_error, created_at FROM sync_jobs`
 
 func (s *Store) scanJob(row *sql.Row) (*SyncJob, error) {
 	var j SyncJob
-	err := row.Scan(&j.ID, &j.RepoID, &j.Kind, &j.Status, &j.CursorState, &j.Attempts,
+	err := row.Scan(&j.ID, &j.RepoID, &j.Kind, &j.Status, &j.Attempts,
 		&j.NextRunAt, &j.LockedAt, &j.LastError, &j.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -150,7 +177,7 @@ func (s *Store) scanJob(row *sql.Row) (*SyncJob, error) {
 
 func scanJobRows(rows *sql.Rows) (*SyncJob, error) {
 	var j SyncJob
-	err := rows.Scan(&j.ID, &j.RepoID, &j.Kind, &j.Status, &j.CursorState, &j.Attempts,
+	err := rows.Scan(&j.ID, &j.RepoID, &j.Kind, &j.Status, &j.Attempts,
 		&j.NextRunAt, &j.LockedAt, &j.LastError, &j.CreatedAt)
 	if err != nil {
 		return nil, err

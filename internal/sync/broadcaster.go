@@ -62,15 +62,28 @@ func (b *Broadcaster) Subscribe(repoID int64) (<-chan Event, func()) {
 // handler test). Production code in this package calls publish directly.
 func (b *Broadcaster) PublishForTest(repoID int64, ev Event) { b.publish(repoID, ev) }
 
-// publish delivers ev to every subscriber of ev.RepoID. It never blocks: if a
-// subscriber's buffer is full the event is dropped for that subscriber.
+// publish delivers ev to every subscriber of ev.RepoID. It never blocks. If a
+// subscriber's buffer is full it drops the OLDEST queued event and enqueues ev,
+// so a lagging subscriber keeps the most recent state — importantly the terminal
+// Done event, which the SSE handler relies on to close the stream.
 func (b *Broadcaster) publish(repoID int64, ev Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for ch := range b.subs[repoID] {
 		select {
 		case ch <- ev:
-		default: // subscriber lagging; drop rather than stall the worker
+		default:
+			// Buffer full: evict one old event (non-blocking), then retry the
+			// send (also non-blocking). Worst case under heavy contention we
+			// still drop ev, but never stall the worker.
+			select {
+			case <-ch:
+			default:
+			}
+			select {
+			case ch <- ev:
+			default:
+			}
 		}
 	}
 }

@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdsync "sync"
 	"time"
@@ -24,6 +25,7 @@ type Config struct {
 	MaxAttempts       int              // job failures before terminal error (default 5)
 	FailBackoff       time.Duration    // base backoff between attempts (default 1m)
 	IdleWait          time.Duration    // worker sleep when the queue is empty (default 200ms)
+	JobRetention      time.Duration    // age after which done/error jobs are pruned (default 7d)
 }
 
 // Engine owns the worker pool, the scheduler, and the progress broadcaster.
@@ -59,6 +61,9 @@ func NewEngine(st *store.Store, factory ClientFactory, cfg Config) *Engine {
 	}
 	if cfg.IdleWait <= 0 {
 		cfg.IdleWait = 200 * time.Millisecond
+	}
+	if cfg.JobRetention <= 0 {
+		cfg.JobRetention = 7 * 24 * time.Hour
 	}
 	return &Engine{store: st, newClient: factory, cfg: cfg, bc: NewBroadcaster()}
 }
@@ -105,13 +110,21 @@ func (e *Engine) processNextJob(ctx context.Context) (bool, error) {
 
 	// Success → mark done.
 	if runErr == nil {
-		_ = e.store.CompleteJob(ctx, job.ID, e.cfg.Now())
+		_ = e.store.CompleteJob(ctx, job.ID)
 		e.bc.publish(job.RepoID, Event{RepoID: job.RepoID, Phase: "done", Message: "complete", Done: true})
 		return true, nil
 	}
-	// Budget exhausted → reschedule at the bucket reset WITHOUT counting a
-	// failure (the cursor is already persisted by backfill/delta).
-	if reset, exhausted := e.budgetReset(client); exhausted {
+	// Rate-limited → reschedule at the bucket reset WITHOUT counting a failure
+	// (the cursor is already persisted by backfill/delta). A typed RateLimitError
+	// is the only signal we treat this way, so a genuine error that merely
+	// coincides with a drained bucket is still recorded as a failure below.
+	var rlErr *githubapi.RateLimitError
+	if errors.As(runErr, &rlErr) {
+		reset := rlErr.Reset
+		if !reset.After(e.cfg.Now()) {
+			// Unknown or already-past reset: back off rather than hot-loop.
+			reset = e.cfg.Now().Add(e.cfg.FailBackoff)
+		}
 		_ = e.store.RescheduleJob(ctx, job.ID, reset)
 		e.bc.publish(job.RepoID, Event{RepoID: job.RepoID, Phase: job.Kind, Message: "rate-limited; rescheduled"})
 		return true, nil
@@ -131,28 +144,6 @@ func (e *Engine) runJob(ctx context.Context, job *store.SyncJob, client *githuba
 		return RunDelta(ctx, e.store, client, job.RepoID, e.cfg.Now)
 	default:
 		return fmt.Errorf("unknown job kind %q", job.Kind)
-	}
-}
-
-// budgetReset reports whether either rate-limit bucket is exhausted and, if so,
-// the soonest reset time to reschedule at.
-//
-// Compatibility note: client.Budget is always non-nil (NewClient initialises it
-// via NewBudget). Budget.GraphQL() and Budget.REST() both return
-// (remaining int, reset time.Time), which matches the reference exactly.
-func (e *Engine) budgetReset(client *githubapi.Client) (time.Time, bool) {
-	if client.Budget == nil {
-		return time.Time{}, false
-	}
-	gqlRem, gqlReset := client.Budget.GraphQL()
-	restRem, restReset := client.Budget.REST()
-	switch {
-	case gqlRem <= 0 && !gqlReset.IsZero():
-		return gqlReset, true
-	case restRem <= 0 && !restReset.IsZero():
-		return restReset, true
-	default:
-		return time.Time{}, false
 	}
 }
 
@@ -181,15 +172,28 @@ func (e *Engine) enqueueDueDeltas(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			// Skip repos synced more recently than the cadence.
-			if ss.LastBackfillAt != nil && now.Sub(*ss.LastBackfillAt) < e.cfg.DeltaCadence {
+			// A delta only makes sense once a backfill has completed; until then
+			// (never backfilled, or backfill still in flight / terminally failed)
+			// leave the repo to its backfill job. This also stops a permanently
+			// failing backfill from spawning a delta on every tick.
+			if ss.LastBackfillAt == nil {
 				continue
 			}
-			pending, err := e.hasOpenJob(ctx, r.ID)
+			// Throttle by the freshest sync marker. Keying off LastBackfillAt
+			// alone never re-arms (backfill stamps it once), so RunDelta also
+			// stamps LastDeltaAt and we gate on the more recent of the two.
+			lastSync := *ss.LastBackfillAt
+			if ss.LastDeltaAt != nil && ss.LastDeltaAt.After(lastSync) {
+				lastSync = *ss.LastDeltaAt
+			}
+			if now.Sub(lastSync) < e.cfg.DeltaCadence {
+				continue
+			}
+			open, err := e.store.HasOpenJob(ctx, r.ID)
 			if err != nil {
 				return err
 			}
-			if pending {
+			if open {
 				continue
 			}
 			if _, err := e.store.EnqueueJob(ctx, r.ID, "delta", now); err != nil {
@@ -198,21 +202,6 @@ func (e *Engine) enqueueDueDeltas(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-// hasOpenJob reports whether a repo already has a pending or running job (so the
-// scheduler does not pile duplicates).
-func (e *Engine) hasOpenJob(ctx context.Context, repoID int64) (bool, error) {
-	jobs, err := e.store.ListJobsForRepo(ctx, repoID)
-	if err != nil {
-		return false, err
-	}
-	for _, j := range jobs {
-		if j.Status == "pending" || j.Status == "running" {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // trackingUserIDs returns the distinct user ids that track any repo.
@@ -278,6 +267,7 @@ func (e *Engine) scheduler(ctx context.Context) {
 			return
 		case <-ticker.C:
 			_ = e.enqueueDueDeltas(ctx)
+			_, _ = e.store.PruneTerminalJobs(ctx, e.cfg.Now().Add(-e.cfg.JobRetention))
 		}
 	}
 }

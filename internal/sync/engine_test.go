@@ -233,3 +233,143 @@ func mustUser(t *testing.T, st *store.Store) int64 {
 	}
 	return id
 }
+
+// TestProcessNextJobRateLimitReschedules guards the rate-limit handling: a
+// RateLimitError must reschedule the job at the bucket reset WITHOUT counting an
+// attempt (so it never burns toward MaxAttempts), and the pre-flight check must
+// avoid making the doomed request at all.
+func TestProcessNextJobRateLimitReschedules(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	// The meta query succeeds but reports the GraphQL bucket drained
+	// (remaining:0); the next query (history) is then refused pre-flight, so the
+	// server must never see it.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var req struct {
+			Query string `json:"query"`
+		}
+		_ = json.Unmarshal(raw, &req)
+		w.Header().Set("Content-Type", "application/json")
+		const rl = `"rateLimit":{"cost":1,"remaining":0,"resetAt":"2026-05-21T13:00:00Z"}`
+		if strings.Contains(req.Query, "databaseId") {
+			w.Write([]byte(`{"data":{"repository":{"databaseId":1,"nameWithOwner":"octocat/hello",
+				"isPrivate":false,"description":"","stargazerCount":0,"forkCount":0,
+				"defaultBranchRef":{"name":"main"}},` + rl + `}}`))
+			return
+		}
+		t.Errorf("pre-flight should have refused this query after exhaustion: %s", req.Query)
+	}))
+	defer srv.Close()
+
+	now := ptime("2026-05-21T00:00:00Z")
+	eng := newEngine(t, st, srv.URL, func() time.Time { return now })
+	repoID, _ := st.UpsertRepo(ctx, &store.Repo{GitHubID: 1, FullName: "octocat/hello", DefaultBranch: "main"})
+	if _, err := eng.TriggerBackfill(ctx, repoID); err != nil {
+		t.Fatal(err)
+	}
+
+	ran, err := eng.processNextJob(ctx)
+	if err != nil {
+		t.Fatalf("processNextJob: %v", err)
+	}
+	if !ran {
+		t.Fatal("expected the job to be processed")
+	}
+
+	jobs, _ := st.ListJobsForRepo(ctx, repoID)
+	if len(jobs) != 1 {
+		t.Fatalf("want 1 job, got %d", len(jobs))
+	}
+	j := jobs[0]
+	if j.Status != "pending" {
+		t.Fatalf("status = %q, want pending (rescheduled)", j.Status)
+	}
+	if j.Attempts != 0 {
+		t.Fatalf("attempts = %d, want 0 (rate-limit must not count as a failure)", j.Attempts)
+	}
+	if want := ptime("2026-05-21T13:00:00Z"); !j.NextRunAt.Equal(want) {
+		t.Fatalf("next_run_at = %v, want bucket reset %v", j.NextRunAt, want)
+	}
+}
+
+func countDeltaJobs(t *testing.T, st *store.Store, repoID int64) int {
+	t.Helper()
+	jobs, err := st.ListJobsForRepo(context.Background(), repoID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, j := range jobs {
+		if j.Kind == "delta" {
+			n++
+		}
+	}
+	return n
+}
+
+// TestDeltaCadenceReArmsAfterCompletedDelta guards the cadence fix: once a delta
+// has run, the scheduler must NOT enqueue another until DeltaCadence elapses
+// (measured from the delta, via LastDeltaAt) — even though the open-job guard no
+// longer applies. The earlier RespectsCadence test only exercised the duplicate
+// guard while a delta was still pending, so it could not catch a dead cadence.
+func TestDeltaCadenceReArmsAfterCompletedDelta(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	uid := mustUser(t, st)
+
+	clock := ptime("2026-05-21T12:00:00Z")
+	eng := newEngine(t, st, "http://unused", func() time.Time { return clock })
+
+	repoID, _ := st.UpsertRepo(ctx, &store.Repo{GitHubID: 1, FullName: "octocat/hello", DefaultBranch: "main"})
+	if err := st.TrackRepo(ctx, uid, repoID); err != nil {
+		t.Fatal(err)
+	}
+	// Backfill completed 2h ago (cadence elapsed); no delta yet.
+	bf := clock.Add(-2 * time.Hour)
+	if err := st.UpsertSyncState(ctx, &store.SyncState{RepoID: repoID, LastBackfillAt: &bf, Status: "complete"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// First pass enqueues a delta.
+	if err := eng.enqueueDueDeltas(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := countDeltaJobs(t, st, repoID); n != 1 {
+		t.Fatalf("first pass: want 1 delta, got %d", n)
+	}
+
+	// Simulate the delta being leased, completed, and RunDelta stamping
+	// LastDeltaAt = now.
+	job, err := st.LeaseNextJob(ctx, clock)
+	if err != nil || job == nil {
+		t.Fatalf("lease: job=%v err=%v", job, err)
+	}
+	if err := st.CompleteJob(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	ss, _ := st.GetSyncState(ctx, repoID)
+	ss.LastDeltaAt = &clock
+	if err := st.UpsertSyncState(ctx, ss); err != nil {
+		t.Fatal(err)
+	}
+
+	// Immediately after: cadence has NOT elapsed since the delta → no new delta,
+	// and crucially the open-job guard is no longer what's stopping it.
+	if err := eng.enqueueDueDeltas(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := countDeltaJobs(t, st, repoID); n != 1 {
+		t.Fatalf("cadence ignored: delta re-enqueued immediately after completion (got %d deltas)", n)
+	}
+
+	// Advance the clock past the cadence → a fresh delta is enqueued.
+	clock = clock.Add(31 * time.Minute)
+	if err := eng.enqueueDueDeltas(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := countDeltaJobs(t, st, repoID); n != 2 {
+		t.Fatalf("cadence did not re-arm: want 2 deltas after cadence elapsed, got %d", n)
+	}
+}

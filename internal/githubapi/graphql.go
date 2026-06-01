@@ -24,6 +24,13 @@ type graphqlError struct {
 // any GraphQL errors and updates the Budget from a rateLimit block if the
 // decoded data contains one (target may embed `RateLimit` under "rateLimit").
 func (c *Client) graphql(ctx context.Context, query string, vars map[string]any, target any) error {
+	// Pre-flight: if the GraphQL bucket is already drained, refuse the (doomed)
+	// request and surface a typed RateLimitError so the engine reschedules at the
+	// reset rather than burning the call and counting a failed attempt.
+	if c.Budget.GraphQLExhausted() {
+		_, reset := c.Budget.GraphQL()
+		return &RateLimitError{Resource: "graphql", Reset: reset}
+	}
 	payload, err := json.Marshal(graphqlRequest{Query: query, Variables: vars})
 	if err != nil {
 		return err

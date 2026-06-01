@@ -122,7 +122,7 @@ func TestCompleteJob(t *testing.T) {
 	if _, err := s.LeaseNextJob(ctx, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CompleteJob(ctx, id, now); err != nil {
+	if err := s.CompleteJob(ctx, id); err != nil {
 		t.Fatal(err)
 	}
 

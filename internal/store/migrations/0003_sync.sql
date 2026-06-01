@@ -4,7 +4,6 @@ CREATE TABLE sync_jobs (
     repo_id      INTEGER NOT NULL,
     kind         TEXT    NOT NULL,              -- 'backfill' | 'delta'
     status       TEXT    NOT NULL DEFAULT 'pending', -- 'pending' | 'running' | 'done' | 'error'
-    cursor_state TEXT    NOT NULL DEFAULT '',   -- opaque JSON scratch (cursors live in sync_state)
     attempts     INTEGER NOT NULL DEFAULT 0,
     next_run_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     locked_at    TIMESTAMP,                     -- NULL when not leased

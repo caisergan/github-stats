@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -72,7 +73,9 @@ func (s *Server) addRepo(w http.ResponseWriter, r *http.Request) {
 
 	client, err := s.userClient(r, u.ID)
 	if err != nil {
-		http.Error(w, "no github credential", http.StatusBadGateway)
+		// A logged-in user without a usable OAuth credential is an unexpected
+		// server-side state, not an upstream (GitHub) failure.
+		http.Error(w, "no github credential", http.StatusInternalServerError)
 		return
 	}
 	meta, err := client.FetchRepoMeta(r.Context(), owner, name)
@@ -189,12 +192,9 @@ func toRepoJSON(repo *store.Repo, repoID int64, ss *store.SyncState) repoJSON {
 	return j
 }
 
-// splitFullName splits "owner/name" into its parts.
+// splitFullName splits "owner/name" into its parts. A name with no "/" yields
+// (fullName, "").
 func splitFullName(fullName string) (owner, name string) {
-	for i := 0; i < len(fullName); i++ {
-		if fullName[i] == '/' {
-			return fullName[:i], fullName[i+1:]
-		}
-	}
-	return fullName, ""
+	owner, name, _ = strings.Cut(fullName, "/")
+	return owner, name
 }

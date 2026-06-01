@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github-stats/internal/datespan"
 	"github-stats/internal/githubapi"
 	"github-stats/internal/store"
 )
@@ -33,15 +34,30 @@ func RunDelta(ctx context.Context, st *store.Store, client *githubapi.Client, re
 		return err
 	}
 
+	nowVal := now()
+
+	// Commits page from the last recorded commit time (commit-cursor semantics).
 	var since time.Time
 	if ss.LastCommitAt != nil {
 		since = *ss.LastCommitAt
 	} else {
-		since = now().Add(-freshLookback)
+		since = nowVal.Add(-freshLookback)
 	}
-	cutoff := since.Add(-overlapWindow)
 
-	span := &dateSpan{}
+	// PR/issue paging stops at a cutoff derived from the freshest *sync* marker
+	// (not just the last commit) minus an overlap window. Keying purely off
+	// LastCommitAt would re-scan the whole updated-history every run on repos
+	// whose commits are infrequent; using the last sync time bounds the rescan.
+	lastSync := since
+	if ss.LastBackfillAt != nil && ss.LastBackfillAt.After(lastSync) {
+		lastSync = *ss.LastBackfillAt
+	}
+	if ss.LastDeltaAt != nil && ss.LastDeltaAt.After(lastSync) {
+		lastSync = *ss.LastDeltaAt
+	}
+	cutoff := lastSync.Add(-overlapWindow)
+
+	span := &datespan.Span{}
 	newest := since
 
 	// --- Commits since ---
@@ -55,7 +71,7 @@ func RunDelta(ctx context.Context, st *store.Store, client *githubapi.Client, re
 			return err
 		}
 		for _, c := range page.Commits {
-			span.add(c.CommittedAt)
+			span.Add(c.CommittedAt)
 			if c.CommittedAt.After(newest) {
 				newest = c.CommittedAt
 			}
@@ -129,63 +145,45 @@ issueLoop:
 	}
 
 	// Recompute aggregates over the touched span.
-	if !span.min.IsZero() {
-		from := span.min.UTC().Format("2006-01-02")
-		to := span.max.UTC().Format("2006-01-02")
+	if !span.Empty() {
+		from, to := span.Range()
 		if err := st.RecomputeDailyStats(ctx, repoID, from, to); err != nil {
 			return err
 		}
 	}
 
-	// Advance sync state.
+	// Advance sync state. LastDeltaAt records this run so the scheduler can
+	// throttle delta cadence off it (LastBackfillAt is stamped only once).
 	ss.LastCommitAt = &newest
+	ss.LastDeltaAt = &nowVal
 	ss.Status = "complete"
 	return st.UpsertSyncState(ctx, ss)
 }
 
-func addPRSpan(span *dateSpan, prs []store.PullRequest) {
+func addPRSpan(span *datespan.Span, prs []store.PullRequest) {
 	for _, p := range prs {
-		span.add(p.CreatedAt)
+		span.Add(p.CreatedAt)
 		if p.MergedAt != nil {
-			span.add(*p.MergedAt)
+			span.Add(*p.MergedAt)
 		}
 		if p.ClosedAt != nil {
-			span.add(*p.ClosedAt)
+			span.Add(*p.ClosedAt)
 		}
 	}
 }
 
-func addIssueSpan(span *dateSpan, issues []store.Issue) {
+func addIssueSpan(span *datespan.Span, issues []store.Issue) {
 	for _, is := range issues {
-		span.add(is.CreatedAt)
+		span.Add(is.CreatedAt)
 		if is.ClosedAt != nil {
-			span.add(*is.ClosedAt)
+			span.Add(*is.ClosedAt)
 		}
 	}
 }
 
-// dateSpan tracks the min/max event dates touched during a delta so the
-// aggregate recompute covers exactly the affected range.
-type dateSpan struct {
-	min, max time.Time
-}
-
-func (d *dateSpan) add(t time.Time) {
-	if t.IsZero() {
-		return
-	}
-	if d.min.IsZero() || t.Before(d.min) {
-		d.min = t
-	}
-	if d.max.IsZero() || t.After(d.max) {
-		d.max = t
-	}
-}
-
-// splitFullName splits "owner/name" into its parts.
+// splitFullName splits "owner/name" into its parts. A name with no "/" yields
+// (fullName, "").
 func splitFullName(fullName string) (owner, name string) {
-	if i := strings.IndexByte(fullName, '/'); i >= 0 {
-		return fullName[:i], fullName[i+1:]
-	}
-	return fullName, ""
+	owner, name, _ = strings.Cut(fullName, "/")
+	return owner, name
 }

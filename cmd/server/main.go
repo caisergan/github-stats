@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -11,7 +12,9 @@ import (
 	"github-stats/internal/auth"
 	"github-stats/internal/config"
 	"github-stats/internal/crypto"
+	"github-stats/internal/githubapi"
 	"github-stats/internal/store"
+	gosync "github-stats/internal/sync"
 )
 
 func main() {
@@ -42,7 +45,15 @@ func main() {
 		HTTP:         http.DefaultClient,
 	}
 	authSvc := auth.NewService(cfg, st, oauth, cipher)
-	srv := api.NewServer(cfg, st, authSvc)
+
+	engine := gosync.NewEngine(st, func(repoID int64) (*githubapi.Client, error) {
+		// TODO(task-9): decrypt the tracking user's token from the store.
+		return nil, nil
+	}, gosync.Config{})
+	engine.Start(context.Background())
+	defer engine.Stop()
+
+	srv := api.NewServer(cfg, st, authSvc, engine, cipher)
 
 	log.Printf("listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, srv); err != nil {

@@ -9,7 +9,9 @@ import (
 
 	"github-stats/internal/auth"
 	"github-stats/internal/config"
+	"github-stats/internal/crypto"
 	"github-stats/internal/store"
+	gosync "github-stats/internal/sync"
 	"github-stats/web"
 )
 
@@ -18,12 +20,16 @@ type Server struct {
 	cfg    config.Config
 	store  *store.Store
 	auth   *auth.Service
+	engine *gosync.Engine
+	cipher *crypto.Cipher
 	router chi.Router
 }
 
-// NewServer builds the router with all routes mounted.
-func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service) *Server {
-	s := &Server{cfg: cfg, store: st, auth: authSvc}
+// NewServer builds the router with all routes mounted. It also takes the sync
+// Engine (for triggering/streaming syncs) and the Cipher (to decrypt the
+// caller's OAuth token when minting a per-user GitHub client).
+func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine *gosync.Engine, cipher *crypto.Cipher) *Server {
+	s := &Server{cfg: cfg, store: st, auth: authSvc, engine: engine, cipher: cipher}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 
@@ -37,6 +43,11 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service) *Serve
 		api.Group(func(pr chi.Router) {
 			pr.Use(authSvc.RequireUser)
 			pr.Get("/me", s.me)
+			pr.Post("/repos", s.addRepo)
+			pr.Get("/repos", s.listRepos)
+			pr.Delete("/repos/{id}", s.untrackRepo)
+			pr.Post("/repos/{id}/refresh", s.refreshRepo)
+			pr.Get("/repos/{id}/sync/stream", s.syncStream)
 		})
 	})
 

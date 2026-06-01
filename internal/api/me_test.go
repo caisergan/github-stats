@@ -12,7 +12,9 @@ import (
 	"github-stats/internal/auth"
 	"github-stats/internal/config"
 	"github-stats/internal/crypto"
+	"github-stats/internal/githubapi"
 	"github-stats/internal/store"
+	gosync "github-stats/internal/sync"
 )
 
 func testServer(t *testing.T) (*Server, *store.Store) {
@@ -25,7 +27,16 @@ func testServer(t *testing.T) (*Server, *store.Store) {
 	cph, _ := crypto.NewCipher(make([]byte, 32))
 	cfg := config.Config{SessionTTL: time.Hour, BaseURL: "http://localhost:8080"}
 	svc := auth.NewService(cfg, st, &auth.OAuthClient{}, cph)
-	return NewServer(cfg, st, svc), st
+	eng := gosync.NewEngine(st, func(repoID int64) (*githubapi.Client, error) {
+		return githubapi.NewClient(githubapi.Options{
+			Token:       "t",
+			GraphQLURL:  "http://unused",
+			RESTBaseURL: "http://unused",
+			Store:       st,
+			HTTP:        &http.Client{},
+		}), nil
+	}, gosync.Config{})
+	return NewServer(cfg, st, svc, eng, cph), st
 }
 
 func TestMeUnauthorized(t *testing.T) {

@@ -51,6 +51,11 @@ func NewClient(o Options) *Client {
 // restGET performs a GET against the REST base URL and returns the body bytes.
 // Routed through the client's transport (ETag-conditional when wired that way).
 func (c *Client) restGET(ctx context.Context, path string) ([]byte, int, error) {
+	// Pre-flight: refuse if the REST bucket is drained, mirroring graphql().
+	if c.Budget.RESTExhausted() {
+		_, reset := c.Budget.REST()
+		return nil, 0, &RateLimitError{Resource: "rest", Reset: reset}
+	}
 	url := c.restBaseURL + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

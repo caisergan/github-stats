@@ -15,6 +15,7 @@ type SyncState struct {
 	LastIssueCursor   string
 	LastReleaseCursor string
 	LastBackfillAt    *time.Time
+	LastDeltaAt       *time.Time
 	Status            string // "" | "backfilling" | "complete"
 }
 
@@ -24,10 +25,10 @@ func (s *Store) GetSyncState(ctx context.Context, repoID int64) (*SyncState, err
 	st := &SyncState{RepoID: repoID}
 	err := s.DB.QueryRowContext(ctx, `
 		SELECT last_commit_at, last_commit_cursor, last_pr_cursor, last_issue_cursor,
-			last_release_cursor, last_backfill_at, status
+			last_release_cursor, last_backfill_at, last_delta_at, status
 		FROM sync_state WHERE repo_id = ?`, repoID,
 	).Scan(&st.LastCommitAt, &st.LastCommitCursor, &st.LastPRCursor, &st.LastIssueCursor,
-		&st.LastReleaseCursor, &st.LastBackfillAt, &st.Status)
+		&st.LastReleaseCursor, &st.LastBackfillAt, &st.LastDeltaAt, &st.Status)
 	if err == sql.ErrNoRows {
 		return st, nil
 	}
@@ -41,8 +42,8 @@ func (s *Store) GetSyncState(ctx context.Context, repoID int64) (*SyncState, err
 func (s *Store) UpsertSyncState(ctx context.Context, st *SyncState) error {
 	_, err := s.DB.ExecContext(ctx, `
 		INSERT INTO sync_state (repo_id, last_commit_at, last_commit_cursor, last_pr_cursor,
-			last_issue_cursor, last_release_cursor, last_backfill_at, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			last_issue_cursor, last_release_cursor, last_backfill_at, last_delta_at, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(repo_id) DO UPDATE SET
 			last_commit_at = excluded.last_commit_at,
 			last_commit_cursor = excluded.last_commit_cursor,
@@ -50,9 +51,10 @@ func (s *Store) UpsertSyncState(ctx context.Context, st *SyncState) error {
 			last_issue_cursor = excluded.last_issue_cursor,
 			last_release_cursor = excluded.last_release_cursor,
 			last_backfill_at = excluded.last_backfill_at,
+			last_delta_at = excluded.last_delta_at,
 			status = excluded.status`,
 		st.RepoID, st.LastCommitAt, st.LastCommitCursor, st.LastPRCursor,
-		st.LastIssueCursor, st.LastReleaseCursor, st.LastBackfillAt, st.Status,
+		st.LastIssueCursor, st.LastReleaseCursor, st.LastBackfillAt, st.LastDeltaAt, st.Status,
 	)
 	return err
 }

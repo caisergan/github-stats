@@ -58,6 +58,10 @@ func (b *Broadcaster) Subscribe(repoID int64) (<-chan Event, func()) {
 	return ch, cancel
 }
 
+// PublishForTest exposes publish for cross-package tests (e.g. the api SSE
+// handler test). Production code in this package calls publish directly.
+func (b *Broadcaster) PublishForTest(repoID int64, ev Event) { b.publish(repoID, ev) }
+
 // publish delivers ev to every subscriber of ev.RepoID. It never blocks: if a
 // subscriber's buffer is full the event is dropped for that subscriber.
 func (b *Broadcaster) publish(repoID int64, ev Event) {

@@ -1,5 +1,31 @@
 import { useEffect, useState } from "react";
+import { Routes, Route, Link } from "react-router-dom";
 import { fetchMe, type Me } from "./api";
+import Overview from "./pages/Overview";
+import RepoDetail from "./pages/RepoDetail";
+
+function SignIn() {
+  return (
+    <div className="app-shell">
+      <header className="user-bar"><span className="brand">GitHub Stats</span></header>
+      <div className="notice">
+        <p>Track public and private repository analytics without GitHub premium.</p>
+        <p><a className="primary-link" href="/auth/github">Sign in with GitHub</a></p>
+      </div>
+    </div>
+  );
+}
+
+function NotFound() {
+  return (
+    <div className="app-shell">
+      <div className="notice">
+        <p>Page not found.</p>
+        <p><Link to="/">← Back to overview</Link></p>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -8,31 +34,18 @@ export default function App() {
   useEffect(() => {
     fetchMe()
       .then(setMe)
+      .catch(() => setMe(null))
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <p>Loading…</p>;
-
-  if (!me) {
-    return (
-      <main style={{ fontFamily: "system-ui", padding: 40 }}>
-        <h1>GitHub Stats</h1>
-        <a href="/auth/github">Sign in with GitHub</a>
-      </main>
-    );
-  }
+  if (loading) return <div className="app-shell"><p className="state">Loading…</p></div>;
+  if (!me) return <SignIn />;
 
   return (
-    <main style={{ fontFamily: "system-ui", padding: 40 }}>
-      <h1>GitHub Stats</h1>
-      <p>
-        Signed in as <strong>{me.login}</strong>
-        {me.avatar_url && (
-          <img src={me.avatar_url} alt="" width={24} height={24}
-               style={{ verticalAlign: "middle", marginLeft: 8, borderRadius: "50%" }} />
-        )}
-      </p>
-      <a href="/auth/logout">Sign out</a>
-    </main>
+    <Routes>
+      <Route path="/" element={<Overview me={me} />} />
+      <Route path="/:owner/:repo" element={<RepoDetail />} />
+      <Route path="*" element={<NotFound />} />
+    </Routes>
   );
 }

@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -10,6 +11,7 @@ import (
 	"github-stats/internal/auth"
 	"github-stats/internal/config"
 	"github-stats/internal/crypto"
+	"github-stats/internal/metrics"
 	"github-stats/internal/store"
 	gosync "github-stats/internal/sync"
 	"github-stats/web"
@@ -17,12 +19,14 @@ import (
 
 // Server holds HTTP dependencies and the router.
 type Server struct {
-	cfg    config.Config
-	store  *store.Store
-	auth   *auth.Service
-	engine *gosync.Engine
-	cipher *crypto.Cipher
-	router chi.Router
+	cfg      config.Config
+	store    *store.Store
+	auth     *auth.Service
+	engine   *gosync.Engine
+	cipher   *crypto.Cipher
+	router   chi.Router
+	registry *metrics.Registry
+	now      func() time.Time
 }
 
 // NewServer builds the router with all routes mounted. It also takes the sync
@@ -30,6 +34,10 @@ type Server struct {
 // caller's OAuth token when minting a per-user GitHub client).
 func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine *gosync.Engine, cipher *crypto.Cipher) *Server {
 	s := &Server{cfg: cfg, store: st, auth: authSvc, engine: engine, cipher: cipher}
+	s.registry = metrics.DefaultRegistry()
+	if s.now == nil {
+		s.now = time.Now
+	}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 
@@ -48,6 +56,9 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 			pr.Delete("/repos/{id}", s.untrackRepo)
 			pr.Post("/repos/{id}/refresh", s.refreshRepo)
 			pr.Get("/repos/{id}/sync/stream", s.syncStream)
+			pr.Get("/repos/{id}", s.repoOverview)
+			pr.Get("/repos/{id}/metrics", s.repoMetrics)
+			pr.Get("/repos/{id}/latest/{kind}", s.repoLatest)
 		})
 	})
 

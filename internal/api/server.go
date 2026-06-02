@@ -58,6 +58,7 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 			pr.Get("/repos/{id}/sync/stream", s.syncStream)
 			pr.Get("/repos/{id}", s.repoOverview)
 			pr.Get("/repos/{id}/metrics", s.repoMetrics)
+			pr.Get("/repos/{id}/latest/{kind}", s.repoLatest)
 		})
 	})
 

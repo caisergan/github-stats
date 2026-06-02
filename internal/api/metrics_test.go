@@ -222,3 +222,71 @@ func TestRepoOverviewUntracked404(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
+
+func TestRepoLatestCommits(t *testing.T) {
+	srv, st := testServer(t)
+	repoID := seedMetricsRepo(t, srv, st)
+
+	rec := authedGet(t, srv, st, "/api/repos/"+strconv.FormatInt(repoID, 10)+"/latest/commits?limit=2")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("commits = %d, want 2", len(out))
+	}
+	// Newest first: c3 (03-02T10) then c2 (03-02T09).
+	if out[0]["sha"] != "c3" {
+		t.Fatalf("first sha = %v, want c3", out[0]["sha"])
+	}
+}
+
+func TestRepoLatestPRsAndIssues(t *testing.T) {
+	srv, st := testServer(t)
+	repoID := seedMetricsRepo(t, srv, st)
+
+	recPRs := authedGet(t, srv, st, "/api/repos/"+strconv.FormatInt(repoID, 10)+"/latest/prs")
+	if recPRs.Code != http.StatusOK {
+		t.Fatalf("prs status = %d", recPRs.Code)
+	}
+	var prs []map[string]any
+	json.Unmarshal(recPRs.Body.Bytes(), &prs)
+	if len(prs) != 1 || prs[0]["number"].(float64) != 1 || prs[0]["state"] != "MERGED" {
+		t.Fatalf("prs = %v", prs)
+	}
+
+	recIss := authedGet(t, srv, st, "/api/repos/"+strconv.FormatInt(repoID, 10)+"/latest/issues")
+	if recIss.Code != http.StatusOK {
+		t.Fatalf("issues status = %d", recIss.Code)
+	}
+	var iss []map[string]any
+	json.Unmarshal(recIss.Body.Bytes(), &iss)
+	if len(iss) != 0 {
+		t.Fatalf("issues = %v, want 0 (fixture has none)", iss)
+	}
+}
+
+func TestRepoLatestUnknownKind404(t *testing.T) {
+	srv, st := testServer(t)
+	repoID := seedMetricsRepo(t, srv, st)
+
+	rec := authedGet(t, srv, st, "/api/repos/"+strconv.FormatInt(repoID, 10)+"/latest/bogus")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestRepoLatestUntracked404(t *testing.T) {
+	srv, st := testServer(t)
+	_ = seedMetricsRepo(t, srv, st)
+	ctx := context.Background()
+	other, _ := st.UpsertRepo(ctx, &store.Repo{GitHubID: 88, FullName: "m/n", DefaultBranch: "main"})
+
+	rec := authedGet(t, srv, st, "/api/repos/"+strconv.FormatInt(other, 10)+"/latest/commits")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}

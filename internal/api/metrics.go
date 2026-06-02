@@ -3,8 +3,11 @@ package api
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 
 	"github-stats/internal/auth"
 	"github-stats/internal/metrics"
@@ -172,6 +175,126 @@ func (s *Server) buildOverview(ctx context.Context, repo *store.Repo, repoID int
 		}
 	}
 	return ov, nil
+}
+
+// commitJSON / prJSON / issueJSON are the wire shapes for the latest-items lists.
+type commitJSON struct {
+	SHA          string `json:"sha"`
+	AuthorLogin  string `json:"author_login"`
+	CommittedAt  string `json:"committed_at"`
+	Additions    int64  `json:"additions"`
+	Deletions    int64  `json:"deletions"`
+	IsBot        bool   `json:"is_bot"`
+	MsgFirstLine string `json:"msg_first_line"`
+}
+
+type prJSON struct {
+	Number        int64   `json:"number"`
+	AuthorLogin   string  `json:"author_login"`
+	State         string  `json:"state"`
+	CreatedAt     string  `json:"created_at"`
+	MergedAt      *string `json:"merged_at"`
+	ClosedAt      *string `json:"closed_at"`
+	CommentsCount int64   `json:"comments_count"`
+	IsBot         bool    `json:"is_bot"`
+	Title         string  `json:"title"`
+}
+
+type issueJSON struct {
+	Number        int64   `json:"number"`
+	AuthorLogin   string  `json:"author_login"`
+	State         string  `json:"state"`
+	CreatedAt     string  `json:"created_at"`
+	ClosedAt      *string `json:"closed_at"`
+	CommentsCount int64   `json:"comments_count"`
+	IsBot         bool    `json:"is_bot"`
+	Title         string  `json:"title"`
+}
+
+const isoLayout = "2006-01-02T15:04:05Z07:00"
+
+func fmtTime(t time.Time) string { return t.UTC().Format(isoLayout) }
+
+func fmtTimePtr(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.UTC().Format(isoLayout)
+	return &s
+}
+
+// parseLimit reads ?limit= (default 20, min 1, max 100).
+func parseLimit(raw string) int {
+	const def, max = 20, 100
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return def
+	}
+	if n > max {
+		return max
+	}
+	return n
+}
+
+// repoLatest handles GET /api/repos/{id}/latest/{commits|prs|issues}?limit=.
+func (s *Server) repoLatest(w http.ResponseWriter, r *http.Request) {
+	_, repoID, ok := s.requireTracked(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	limit := parseLimit(r.URL.Query().Get("limit"))
+
+	switch chi.URLParam(r, "kind") {
+	case "commits":
+		rows, err := s.store.LatestCommits(ctx, repoID, limit)
+		if err != nil {
+			http.Error(w, "load failed", http.StatusInternalServerError)
+			return
+		}
+		out := make([]commitJSON, 0, len(rows))
+		for _, c := range rows {
+			out = append(out, commitJSON{
+				SHA: c.SHA, AuthorLogin: c.AuthorLogin, CommittedAt: fmtTime(c.CommittedAt),
+				Additions: c.Additions, Deletions: c.Deletions, IsBot: c.IsBot, MsgFirstLine: c.MsgFirstLine,
+			})
+		}
+		writeJSON(w, http.StatusOK, out)
+	case "prs":
+		rows, err := s.store.LatestPRs(ctx, repoID, limit)
+		if err != nil {
+			http.Error(w, "load failed", http.StatusInternalServerError)
+			return
+		}
+		out := make([]prJSON, 0, len(rows))
+		for _, p := range rows {
+			out = append(out, prJSON{
+				Number: p.Number, AuthorLogin: p.AuthorLogin, State: p.State, CreatedAt: fmtTime(p.CreatedAt),
+				MergedAt: fmtTimePtr(p.MergedAt), ClosedAt: fmtTimePtr(p.ClosedAt),
+				CommentsCount: p.CommentsCount, IsBot: p.IsBot, Title: p.Title,
+			})
+		}
+		writeJSON(w, http.StatusOK, out)
+	case "issues":
+		rows, err := s.store.LatestIssues(ctx, repoID, limit)
+		if err != nil {
+			http.Error(w, "load failed", http.StatusInternalServerError)
+			return
+		}
+		out := make([]issueJSON, 0, len(rows))
+		for _, is := range rows {
+			out = append(out, issueJSON{
+				Number: is.Number, AuthorLogin: is.AuthorLogin, State: is.State, CreatedAt: fmtTime(is.CreatedAt),
+				ClosedAt: fmtTimePtr(is.ClosedAt), CommentsCount: is.CommentsCount, IsBot: is.IsBot, Title: is.Title,
+			})
+		}
+		writeJSON(w, http.StatusOK, out)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown kind"})
+	}
 }
 
 // repoMetrics handles GET /api/repos/{id}/metrics?keys=&window=&exclude_bots=.

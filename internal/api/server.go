@@ -56,6 +56,7 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 			pr.Delete("/repos/{id}", s.untrackRepo)
 			pr.Post("/repos/{id}/refresh", s.refreshRepo)
 			pr.Get("/repos/{id}/sync/stream", s.syncStream)
+			pr.Get("/repos/{id}", s.repoOverview)
 			pr.Get("/repos/{id}/metrics", s.repoMetrics)
 		})
 	})

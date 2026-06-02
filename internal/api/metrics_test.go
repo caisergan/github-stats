@@ -163,3 +163,62 @@ func TestRepoMetricsUnauthorized401(t *testing.T) {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
+
+func TestRepoOverviewBundle(t *testing.T) {
+	srv, st := testServer(t)
+	repoID := seedMetricsRepo(t, srv, st)
+
+	rec := authedGet(t, srv, st, "/api/repos/"+strconv.FormatInt(repoID, 10)+"?window=30d&exclude_bots=true")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var ov struct {
+		ID            int64   `json:"id"`
+		FullName      string  `json:"full_name"`
+		DefaultBranch string  `json:"default_branch"`
+		OpenIssues    int64   `json:"open_issues"`
+		OpenPRs       int64   `json:"open_prs"`
+		Contributors  int64   `json:"contributors"`
+		CommitRate    float64 `json:"commit_rate"`
+		IssueRate     float64 `json:"issue_rate"`
+		PRRate        float64 `json:"pr_rate"`
+		Releases      int64   `json:"releases"`
+		SyncStatus    string  `json:"sync_status"`
+		LastSyncedAt  *string `json:"last_synced_at"`
+		WindowFrom    string  `json:"window_from"`
+		WindowTo      string  `json:"window_to"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &ov); err != nil {
+		t.Fatal(err)
+	}
+	if ov.ID != repoID || ov.FullName != "a/b" {
+		t.Fatalf("overview meta = %+v", ov)
+	}
+	// As of window end (2026-03-15), no open issues/PRs in the fixture.
+	if ov.OpenIssues != 0 || ov.OpenPRs != 0 {
+		t.Fatalf("open counts: issues=%d prs=%d", ov.OpenIssues, ov.OpenPRs)
+	}
+	// Contributors excl bots in window: neo + trinity = 2 (dependabot excluded).
+	if ov.Contributors != 2 {
+		t.Fatalf("contributors = %d, want 2", ov.Contributors)
+	}
+	// commit_rate = 3 commits / 30 days window. window 02-13..03-15 inclusive = 31 days.
+	if ov.CommitRate <= 0 {
+		t.Fatalf("commit_rate = %v, want > 0", ov.CommitRate)
+	}
+	if ov.WindowTo != "2026-03-15" {
+		t.Fatalf("window_to = %q, want 2026-03-15", ov.WindowTo)
+	}
+}
+
+func TestRepoOverviewUntracked404(t *testing.T) {
+	srv, st := testServer(t)
+	_ = seedMetricsRepo(t, srv, st)
+	ctx := context.Background()
+	other, _ := st.UpsertRepo(ctx, &store.Repo{GitHubID: 77, FullName: "p/q", DefaultBranch: "main"})
+
+	rec := authedGet(t, srv, st, "/api/repos/"+strconv.FormatInt(other, 10))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}

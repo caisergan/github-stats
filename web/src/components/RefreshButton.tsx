@@ -25,7 +25,9 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
 
   // Auto-scroll to bottom of log when lines update
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (typeof logEndRef.current?.scrollIntoView === "function") {
+      logEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
   }, [lines]);
 
   function push(text: string, tone: LogLine["tone"]) {

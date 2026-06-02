@@ -9,3 +9,4 @@
 !/web/dist/index.html
 /web/*.tsbuildinfo
 /web/vite.config.d.ts
+frontend-references/

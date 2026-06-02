@@ -5,6 +5,26 @@ import (
 	"testing"
 )
 
+// TestContributorLeaderboardExcludesAllowlistBots guards that exclude_bots drops
+// bot logins that lack the "[bot]" suffix (e.g. GitHub's "web-flow" merge author,
+// or a bare "dependabot"), matching the is_bot flag ingest stamps via botident.
+func TestContributorLeaderboardExcludesAllowlistBots(t *testing.T) {
+	src := &fakeSource{contrib: []DailyContribRow{
+		{Date: "2026-03-01", Login: "neo", Commits: 3, Additions: 30, Deletions: 5},
+		{Date: "2026-03-01", Login: "web-flow", Commits: 50, Additions: 0, Deletions: 0},
+		{Date: "2026-03-01", Login: "github-actions", Commits: 12, Additions: 4, Deletions: 0},
+	}}
+	w := Window{From: "2026-03-01", To: "2026-03-31"}
+
+	res, err := contributorLeaderboard{}.Compute(context.Background(), src, 1, w, Opts{ExcludeBots: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows) != 1 || res.Rows[0].Login != "neo" {
+		t.Fatalf("exclude_bots should drop web-flow and github-actions, got %+v", res.Rows)
+	}
+}
+
 func TestContributorLeaderboardRanking(t *testing.T) {
 	src := &fakeSource{contrib: []DailyContribRow{
 		{Date: "2026-03-01", Login: "neo", Commits: 3, Additions: 30, Deletions: 5},

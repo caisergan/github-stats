@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -315,7 +316,7 @@ func (s *Server) repoMetrics(w http.ResponseWriter, r *http.Request) {
 	out, err := s.registry.Compute(r.Context(), s.store, repoID, keys, win, opts)
 	if err != nil {
 		// Unknown metric key → 400; anything else is a 500.
-		if strings.HasPrefix(err.Error(), "unknown metric") {
+		if errors.Is(err, metrics.ErrUnknownMetric) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

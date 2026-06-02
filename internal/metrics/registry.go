@@ -2,9 +2,15 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 )
+
+// ErrUnknownMetric is returned (wrapped) by Compute when a requested key is not
+// registered, so callers can map it to a 400 with errors.Is rather than matching
+// on the error string.
+var ErrUnknownMetric = errors.New("unknown metric key")
 
 // Metric is a single, self-contained statistic generator (spec §7). Compute reads
 // ONLY from the Source port — never from GitHub or HTTP.
@@ -54,7 +60,7 @@ func (r *Registry) Compute(ctx context.Context, src Source, repoID int64, keys [
 	for _, key := range keys {
 		m, ok := r.metrics[key]
 		if !ok {
-			return nil, fmt.Errorf("unknown metric %q", key)
+			return nil, fmt.Errorf("unknown metric %q: %w", key, ErrUnknownMetric)
 		}
 		res, err := m.Compute(ctx, src, repoID, w, opts)
 		if err != nil {

@@ -3,7 +3,8 @@ package metrics
 import (
 	"context"
 	"sort"
-	"strings"
+
+	"github-stats/internal/botident"
 )
 
 // contributorLeaderboard ranks contributors by commits (then additions, then
@@ -11,12 +12,6 @@ import (
 type contributorLeaderboard struct{}
 
 func (contributorLeaderboard) Key() string { return "contributor_leaderboard" }
-
-// looksLikeBot mirrors githubapi.IsBot's suffix rule without importing the fetch
-// package (keeps the metrics layer free of githubapi).
-func looksLikeBot(login string) bool {
-	return strings.HasSuffix(login, "[bot]")
-}
 
 func (contributorLeaderboard) Compute(ctx context.Context, src Source, repoID int64, w Window, opts Opts) (Result, error) {
 	rows, err := src.DailyContributorStats(ctx, repoID, w.From, w.To)
@@ -26,7 +21,7 @@ func (contributorLeaderboard) Compute(ctx context.Context, src Source, repoID in
 	agg := make(map[string]*LeaderRow)
 	order := make([]string, 0)
 	for _, r := range rows {
-		if opts.ExcludeBots && looksLikeBot(r.Login) {
+		if opts.ExcludeBots && botident.IsBot(r.Login) {
 			continue
 		}
 		lr, ok := agg[r.Login]

@@ -14,14 +14,23 @@ export default function ScalarStat({ result }: Props) {
       ? fmtHours(result.value as number)
       : fmtNumber(result.value as number);
   const unitLabel = isHours ? "" : (result.unit ?? "");
+
   return (
-    <div className="scalar-wrap">
-      <div className="scalar">
-        <span className="value">{display}</span>
-        {unitLabel && <span className="unit">{unitLabel}</span>}
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-3xl font-black text-text tracking-tight hover:text-accent transition-colors duration-200">
+          {display}
+        </span>
+        {unitLabel && (
+          <span className="text-xs font-semibold uppercase text-muted tracking-wider">
+            {unitLabel}
+          </span>
+        )}
       </div>
       {typeof result.count === "number" && (
-        <div className="count">n = {fmtNumber(result.count)}</div>
+        <span className="self-start text-[10px] font-bold text-muted bg-surface-hover px-1.5 py-0.5 rounded border border-border/40">
+          n = {fmtNumber(result.count)}
+        </span>
       )}
     </div>
   );

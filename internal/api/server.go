@@ -44,12 +44,14 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 	// Auth routes.
 	r.Get("/auth/github", authSvc.Login)
 	r.Get("/auth/github/callback", authSvc.Callback)
-	r.Get("/auth/logout", authSvc.Logout)
+	r.Post("/auth/logout", authSvc.Logout)
+	r.Post("/auth/logout/all", authSvc.LogoutEverywhere)
 
 	// JSON API (auth-gated).
 	r.Route("/api", func(api chi.Router) {
 		api.Group(func(pr chi.Router) {
 			pr.Use(authSvc.RequireUser)
+			pr.Use(authSvc.RequireCSRF)
 			pr.Get("/me", s.me)
 			pr.Post("/repos", s.addRepo)
 			pr.Get("/repos", s.listRepos)
@@ -59,6 +61,19 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 			pr.Get("/repos/{id}", s.repoOverview)
 			pr.Get("/repos/{id}/metrics", s.repoMetrics)
 			pr.Get("/repos/{id}/latest/{kind}", s.repoLatest)
+			pr.Get("/collections", s.listCollections)
+			pr.Post("/collections", s.createCollection)
+			pr.Patch("/collections/{id}", s.patchCollection)
+			pr.Delete("/collections/{id}", s.deleteCollection)
+			pr.Post("/collections/{id}/repos/{repoId}", s.addCollectionRepo)
+			pr.Delete("/collections/{id}/repos/{repoId}", s.removeCollectionRepo)
+			pr.Get("/collections/{id}/export", s.exportCollection)
+			pr.Post("/import", s.importManifest)
+			pr.Get("/settings/pat", s.getPATStatus)
+			pr.Put("/settings/pat", s.savePAT)
+			pr.Delete("/settings/pat", s.deletePAT)
+			pr.Get("/rate-limit", s.rateLimit)
+			pr.Get("/csrf", s.csrfToken)
 		})
 	})
 

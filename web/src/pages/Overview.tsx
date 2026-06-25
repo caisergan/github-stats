@@ -1,7 +1,11 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { I } from "../components/Icons";
 import { Select } from "../components/UI";
 import { Kpi, RepoCard, AddRepoForm } from "../components/Components";
+import { RateLimitBanner } from "../components/RateLimitBanner";
+import { CollectionManager } from "../components/CollectionManager";
+import { useCollections } from "../hooks/useCollections";
+import { fetchRateLimit, exportCollectionURL, type RateLimit } from "../api";
 import * as D from "../data";
 import * as F from "../format";
 
@@ -15,6 +19,16 @@ export default function Overview({ repos, onOpen, onAdd }: OverviewProps) {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("activity");
   const [status, setStatus] = useState("all");
+
+  // M6: live rate-limit snapshot + collections (from the JSON API). These are
+  // additive to the existing mock-data repo grid: when the backend has no
+  // collections (or the dev build runs on mock data) the groups are empty and
+  // every repo falls through to the main "Repositories" section below.
+  const cols = useCollections();
+  const [rate, setRate] = useState<RateLimit | null>(null);
+  useEffect(() => {
+    void fetchRateLimit().then(setRate).catch(() => setRate(null));
+  }, []);
 
   // per-repo light metrics for sparklines
   const sparks = useMemo(() => {
@@ -57,6 +71,21 @@ export default function Overview({ repos, onOpen, onAdd }: OverviewProps) {
     };
   }, [repos]);
 
+  // M6: partition the (filtered) repos into one group per collection plus an
+  // "Uncollected" remainder. Membership keys off the API collection's repo_ids.
+  const grouped = cols.collections;
+  const collectionGroups = useMemo(() => {
+    const inAny = new Set<number>();
+    grouped.forEach((c) => c.repo_ids.forEach((id) => inAny.add(id)));
+    return {
+      groups: grouped.map((c) => ({
+        collection: c,
+        members: filtered.filter((r) => c.repo_ids.includes(r.id)),
+      })),
+      uncollected: filtered.filter((r) => !inAny.has(r.id)),
+    };
+  }, [grouped, filtered]);
+
   return (
     <div className="page fade-in">
       <div className="page-head">
@@ -68,6 +97,8 @@ export default function Overview({ repos, onOpen, onAdd }: OverviewProps) {
         </div>
         <AddRepoForm onAdd={onAdd} />
       </div>
+
+      <RateLimitBanner rateLimit={rate} />
 
       <div className="kpi-strip">
         <Kpi
@@ -134,6 +165,7 @@ export default function Overview({ repos, onOpen, onAdd }: OverviewProps) {
             ]}
           />
         </span>
+        <CollectionManager onCreate={cols.create} />
       </div>
 
       {filtered.length === 0 ? (
@@ -142,6 +174,42 @@ export default function Overview({ repos, onOpen, onAdd }: OverviewProps) {
             No repositories match “{q}”.
           </div>
         </div>
+      ) : grouped.length > 0 ? (
+        <>
+          {collectionGroups.groups.map(({ collection, members }) => (
+            <section className="collection-group" key={collection.id}>
+              <h2>
+                {collection.name}
+                <span className="actions">
+                  <a href={exportCollectionURL(collection.id)}>Export</a>
+                  <button className="btn ghost" onClick={() => void cols.remove(collection.id)}>
+                    Delete
+                  </button>
+                </span>
+              </h2>
+              {members.length === 0 ? (
+                <div className="sub" style={{ color: "var(--muted)" }}>
+                  No repositories in this collection.
+                </div>
+              ) : (
+                <div className="repo-grid">
+                  {members.map((r) => (
+                    <RepoCard key={r.id} repo={r} metrics={sparks[r.id]} onOpen={onOpen} />
+                  ))}
+                </div>
+              )}
+            </section>
+          ))}
+
+          <section className="collection-group">
+            <h2>Uncollected</h2>
+            <div className="repo-grid">
+              {collectionGroups.uncollected.map((r) => (
+                <RepoCard key={r.id} repo={r} metrics={sparks[r.id]} onOpen={onOpen} />
+              ))}
+            </div>
+          </section>
+        </>
       ) : (
         <div className="repo-grid">
           {filtered.map((r) => (

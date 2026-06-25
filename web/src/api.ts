@@ -21,6 +21,28 @@ async function asError(res: Response, url: string): Promise<Error> {
   return new Error(detail || `${url} failed: ${res.status}`);
 }
 
+/** Reads the non-httpOnly gs_csrf cookie value, or "" if absent. */
+function readCsrfCookie(): string {
+  const m = /(?:^|;\s*)gs_csrf=([^;]*)/.exec(document.cookie);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
+/**
+ * Returns the CSRF token to send as the X-CSRF-Token header on mutating
+ * requests. Prefers the gs_csrf cookie (no network); falls back to
+ * fetchCsrfToken() which sets the cookie and returns the token.
+ */
+async function csrfToken(): Promise<string> {
+  const fromCookie = readCsrfCookie();
+  if (fromCookie) return fromCookie;
+  return fetchCsrfToken();
+}
+
+/** Builds request headers with the CSRF token attached for mutating calls. */
+async function csrfHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
+  return { ...(extra ?? {}), "X-CSRF-Token": await csrfToken() };
+}
+
 // ---------------------------------------------------------------------------
 // Auth (M1)
 // ---------------------------------------------------------------------------
@@ -30,6 +52,8 @@ export interface Me {
   github_id: number;
   login: string;
   avatar_url: string;
+  scopes?: string;
+  has_pat?: boolean;
 }
 
 export async function fetchMe(): Promise<Me | null> {
@@ -65,7 +89,7 @@ export async function addRepo(fullName: string): Promise<Repo> {
   const res = await fetch("/api/repos", {
     method: "POST",
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
+    headers: await csrfHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ full_name: fullName }),
   });
   if (!res.ok) throw await asError(res, "/api/repos");
@@ -76,6 +100,7 @@ export async function deleteRepo(id: number): Promise<void> {
   const res = await fetch(`/api/repos/${id}`, {
     method: "DELETE",
     credentials: "same-origin",
+    headers: await csrfHeaders(),
   });
   if (!res.ok && res.status !== 204) throw await asError(res, `/api/repos/${id}`);
 }
@@ -84,6 +109,7 @@ export async function refreshRepo(id: number): Promise<void> {
   const res = await fetch(`/api/repos/${id}/refresh`, {
     method: "POST",
     credentials: "same-origin",
+    headers: await csrfHeaders(),
   });
   if (!res.ok && res.status !== 202) throw await asError(res, `/api/repos/${id}/refresh`);
 }
@@ -283,4 +309,167 @@ export function openSyncStream(repoID: number, h: SyncStreamHandlers): SyncStrea
     h.onError?.(e);
   };
   return { close: () => es.close() };
+}
+
+// ---------------------------------------------------------------------------
+// Collections (M6)
+// ---------------------------------------------------------------------------
+
+export interface Collection {
+  id: number;
+  name: string;
+  repo_ids: number[];
+}
+
+export function listCollections(): Promise<Collection[]> {
+  return getJSON<Collection[]>("/api/collections");
+}
+
+export async function createCollection(name: string): Promise<Collection> {
+  const res = await fetch("/api/collections", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: await csrfHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw await asError(res, "/api/collections");
+  return (await res.json()) as Collection;
+}
+
+export async function renameCollection(id: number, name: string): Promise<void> {
+  const res = await fetch(`/api/collections/${id}`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: await csrfHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw await asError(res, `/api/collections/${id}`);
+}
+
+export async function deleteCollection(id: number): Promise<void> {
+  const res = await fetch(`/api/collections/${id}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: await csrfHeaders(),
+  });
+  if (!res.ok && res.status !== 204) throw await asError(res, `/api/collections/${id}`);
+}
+
+export async function addRepoToCollection(collectionID: number, repoID: number): Promise<void> {
+  const res = await fetch(`/api/collections/${collectionID}/repos/${repoID}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: await csrfHeaders(),
+  });
+  if (!res.ok && res.status !== 204) {
+    throw await asError(res, `/api/collections/${collectionID}/repos/${repoID}`);
+  }
+}
+
+export async function removeRepoFromCollection(collectionID: number, repoID: number): Promise<void> {
+  const res = await fetch(`/api/collections/${collectionID}/repos/${repoID}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: await csrfHeaders(),
+  });
+  if (!res.ok && res.status !== 204) {
+    throw await asError(res, `/api/collections/${collectionID}/repos/${repoID}`);
+  }
+}
+
+export function exportCollectionURL(id: number): string {
+  return `/api/collections/${id}/export`;
+}
+
+// ---------------------------------------------------------------------------
+// Import (M6)
+// ---------------------------------------------------------------------------
+
+export interface ImportResult {
+  resolved: string[];
+  unresolved: string[];
+}
+
+export async function importManifest(
+  kind: "package_json" | "requirements_txt" | "collection",
+  body: string,
+): Promise<ImportResult> {
+  const res = await fetch(`/api/import?kind=${kind}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: await csrfHeaders(),
+    body,
+  });
+  if (!res.ok) throw await asError(res, "/api/import");
+  return (await res.json()) as ImportResult;
+}
+
+// ---------------------------------------------------------------------------
+// PAT settings (M6)
+// ---------------------------------------------------------------------------
+
+export interface PatStatus {
+  has_pat: boolean;
+  login?: string;
+}
+
+export function getPatStatus(): Promise<PatStatus> {
+  return getJSON<PatStatus>("/api/settings/pat");
+}
+
+export async function savePat(token: string): Promise<PatStatus> {
+  const res = await fetch("/api/settings/pat", {
+    method: "PUT",
+    credentials: "same-origin",
+    headers: await csrfHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) throw await asError(res, "/api/settings/pat");
+  return (await res.json()) as PatStatus;
+}
+
+export async function deletePat(): Promise<void> {
+  const res = await fetch("/api/settings/pat", {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: await csrfHeaders(),
+  });
+  if (!res.ok && res.status !== 204) throw await asError(res, "/api/settings/pat");
+}
+
+// ---------------------------------------------------------------------------
+// Rate limit (M6)
+// ---------------------------------------------------------------------------
+
+export interface RateBucket {
+  remaining: number;
+  reset: string;
+}
+export interface RateLimit {
+  rest: RateBucket;
+  graphql: RateBucket;
+}
+
+export function fetchRateLimit(): Promise<RateLimit> {
+  return getJSON<RateLimit>("/api/rate-limit");
+}
+
+// ---------------------------------------------------------------------------
+// CSRF + logout (M6)
+// ---------------------------------------------------------------------------
+
+export async function fetchCsrfToken(): Promise<string> {
+  const res = await fetch("/api/csrf", { credentials: "same-origin" });
+  if (!res.ok) throw await asError(res, "/api/csrf");
+  return ((await res.json()) as { csrf_token: string }).csrf_token;
+}
+
+export async function logout(everywhere = false): Promise<void> {
+  const path = everywhere ? "/auth/logout/all" : "/auth/logout";
+  const res = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: await csrfHeaders(),
+  });
+  if (!res.ok && res.status !== 204) throw await asError(res, path);
 }

@@ -63,3 +63,24 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id)
 	return err
 }
+
+// DeleteSessionsForUser removes all of a user's sessions ("log out everywhere").
+// Returns the number of sessions deleted.
+func (s *Store) DeleteSessionsForUser(ctx context.Context, userID int64) (int64, error) {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// DeleteExpiredSessions removes every session whose expires_at is at or before now.
+// Returns the number swept.
+func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
+	res, err := s.DB.ExecContext(ctx,
+		`DELETE FROM sessions WHERE expires_at <= ?`, now.UTC())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

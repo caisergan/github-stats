@@ -18,6 +18,11 @@ type Options struct {
 	RESTBaseURL string // e.g. https://api.github.com
 	Store       *store.Store
 	HTTP        *http.Client // optional; one is built (with ETag transport) if nil
+	// Budget, when non-nil, is the shared rate-limit budget this client updates
+	// from response headers. The sync Engine injects one shared Budget into every
+	// worker's client so a single snapshot (GET /api/rate-limit) reflects real
+	// usage. When nil, NewClient allocates a fresh per-client Budget.
+	Budget *Budget
 }
 
 // Client is a rate-limit-aware GitHub API client (GraphQL + conditional REST).
@@ -39,12 +44,16 @@ func NewClient(o Options) *Client {
 			Transport: &ETagTransport{Store: o.Store, Base: http.DefaultTransport},
 		}
 	}
+	budget := o.Budget
+	if budget == nil {
+		budget = NewBudget()
+	}
 	return &Client{
 		token:       o.Token,
 		graphqlURL:  o.GraphQLURL,
 		restBaseURL: strings.TrimRight(o.RESTBaseURL, "/"),
 		http:        httpClient,
-		Budget:      NewBudget(),
+		Budget:      budget,
 	}
 }
 

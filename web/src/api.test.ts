@@ -12,6 +12,7 @@ import {
   metricsURL,
   overviewURL,
   latestURL,
+  exportCollectionURL,
   type Result,
 } from "./api";
 
@@ -48,6 +49,12 @@ describe("URL builders", () => {
 
   it("latestURL encodes kind + limit", () => {
     expect(latestURL(9, "prs", 50)).toBe("/api/repos/9/latest/prs?limit=50");
+  });
+});
+
+describe("collection export url (M6)", () => {
+  it("builds the export path", () => {
+    expect(exportCollectionURL(42)).toBe("/api/collections/42/export");
   });
 });
 
@@ -90,6 +97,9 @@ describe("fetch wrappers", () => {
     expect(url).toBe("/api/repos");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toEqual({ full_name: "a/b" });
+    // Mutating calls must carry the CSRF double-submit header (read from the
+    // gs_csrf cookie seeded in the test setup, so no extra GET /api/csrf fires).
+    expect(init.headers["X-CSRF-Token"]).toBe("test-csrf-token");
   });
 
   it("addRepo throws with the server message on error", async () => {
@@ -105,6 +115,7 @@ describe("fetch wrappers", () => {
     await deleteRepo(4);
     expect(f.mock.calls[0][0]).toBe("/api/repos/4");
     expect(f.mock.calls[0][1].method).toBe("DELETE");
+    expect(f.mock.calls[0][1].headers["X-CSRF-Token"]).toBe("test-csrf-token");
   });
 
   it("refreshRepo issues POST and resolves on 202", async () => {
@@ -112,6 +123,7 @@ describe("fetch wrappers", () => {
     f.mockResolvedValue(new Response(null, { status: 202 }));
     await refreshRepo(6);
     expect(f.mock.calls[0][1].method).toBe("POST");
+    expect(f.mock.calls[0][1].headers["X-CSRF-Token"]).toBe("test-csrf-token");
   });
 
   it("fetchMetrics returns a keyed Result map", async () => {
@@ -149,6 +161,42 @@ describe("fetch wrappers", () => {
     const rows = await fetchLatest(7, "commits", 20);
     expect(rows).toHaveLength(1);
     expect((rows[0] as { sha: string }).sha).toBe("abc");
+  });
+});
+
+describe("CSRF double-submit on mutating calls", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  it("reuses the gs_csrf cookie without an extra GET /api/csrf", async () => {
+    document.cookie = "gs_csrf=cookie-tok";
+    const f = fetch as ReturnType<typeof vi.fn>;
+    f.mockResolvedValue(new Response(null, { status: 204 }));
+    await deleteRepo(9);
+    // Only the DELETE fires — the cookie short-circuits the token fetch.
+    expect(f.mock.calls).toHaveLength(1);
+    expect(f.mock.calls[0][0]).toBe("/api/repos/9");
+    expect(f.mock.calls[0][1].headers["X-CSRF-Token"]).toBe("cookie-tok");
+  });
+
+  it("falls back to GET /api/csrf when the cookie is absent", async () => {
+    // Expire the seeded cookie so the helper must fetch a fresh token.
+    document.cookie = "gs_csrf=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    expect(document.cookie).not.toContain("gs_csrf");
+    const f = fetch as ReturnType<typeof vi.fn>;
+    f.mockImplementation((url: string) => {
+      if (url === "/api/csrf") {
+        return Promise.resolve(jsonResponse({ csrf_token: "fetched-tok" }));
+      }
+      return Promise.resolve(new Response(null, { status: 204 }));
+    });
+    await deleteRepo(11);
+    // First call is the token fetch, then the mutating DELETE with the header.
+    expect(f.mock.calls[0][0]).toBe("/api/csrf");
+    const del = f.mock.calls.find((c) => c[0] === "/api/repos/11")!;
+    expect(del[1].method).toBe("DELETE");
+    expect(del[1].headers["X-CSRF-Token"]).toBe("fetched-tok");
   });
 });
 

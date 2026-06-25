@@ -13,6 +13,10 @@ import Overview from "./pages/Overview";
 import RepoDetail from "./pages/RepoDetail";
 import Collections from "./pages/Collections";
 import WorkspaceInsights from "./pages/WorkspaceInsights";
+import Settings from "./pages/Settings";
+import { ThemeToggle } from "./components/ThemeToggle";
+import { getTheme, setTheme, type Theme } from "./theme";
+import { logout } from "./api";
 import * as D from "./data";
 
 const ACCENTS = ["#18181b", "#2563eb", "#059669", "#7c3aed", "#dc2626"];
@@ -44,6 +48,16 @@ interface UserMenuProps {
 }
 
 function UserMenu({ me }: UserMenuProps) {
+  // POST /auth/logout with an X-CSRF-Token header (api.logout handles CSRF),
+  // replacing the M5 GET/anchor sign-out.
+  const signOut = async () => {
+    try {
+      await logout(false);
+    } finally {
+      window.location.href = "/";
+    }
+  };
+
   return (
     <Menu
       trigger={
@@ -74,19 +88,24 @@ function UserMenu({ me }: UserMenuProps) {
         Signed in as<b>{me.name}</b>
       </div>
       <div className="sep" />
-      <div className="mi">
+      <Link to="/settings" className="mi">
         <I.settings style={{ width: 14, height: 14 }} />
         Settings
-      </div>
-      <div className="mi">
+      </Link>
+      <a
+        href={`https://github.com/${me.login}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mi"
+      >
         <I.github style={{ width: 14, height: 14 }} />
         GitHub profile
-      </div>
+      </a>
       <div className="sep" />
-      <div className="mi">
+      <button type="button" className="mi" onClick={signOut}>
         <I.signout style={{ width: 14, height: 14 }} />
         Sign out
-      </div>
+      </button>
     </Menu>
   );
 }
@@ -150,7 +169,9 @@ function RepoDetailWrapper({ repos, onBack }: RepoDetailWrapperProps) {
 }
 
 export default function App() {
-  const [tweaks, setTweak] = useState(TWEAK_DEFAULTS);
+  // Initialize the in-memory theme from the persisted choice (theme.ts) so the
+  // tweaks state, the header ThemeToggle, and localStorage all agree on mount.
+  const [tweaks, setTweak] = useState({ ...TWEAK_DEFAULTS, theme: getTheme() });
   const [repos, setRepos] = useState<D.MockRepo[]>(D.REPOS);
   const [collections, setCollections] = useState<D.MockCollection[]>(D.COLLECTIONS);
   const [showTweaks, setShowTweaks] = useState(false);
@@ -159,10 +180,11 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Apply tweaks dynamically to document root element
+  // Apply tweaks dynamically to document root element. Note: `data-theme` is
+  // owned by theme.ts / <ThemeToggle> (the single persisted source of truth),
+  // so it is intentionally NOT set here to avoid two controls fighting over it.
   useEffect(() => {
     const root = document.documentElement;
-    root.setAttribute("data-theme", tweaks.theme);
     root.setAttribute("data-density", tweaks.density);
     root.style.setProperty("--accent", tweaks.accent);
     root.style.setProperty("--accent-fg", accentFg(tweaks.accent));
@@ -260,17 +282,10 @@ export default function App() {
         <button className="btn ghost icon" title="Notifications">
           <I.bell style={{ width: 17, height: 17 }} />
         </button>
-        <button
-          className="btn ghost icon"
-          onClick={() => updateTweak("theme", tweaks.theme === "dark" ? "light" : "dark")}
-          title="Toggle theme"
-        >
-          {tweaks.theme === "dark" ? (
-            <I.sun style={{ width: 17, height: 17 }} />
-          ) : (
-            <I.moon style={{ width: 17, height: 17 }} />
-          )}
-        </button>
+        <ThemeToggle
+          value={tweaks.theme as Theme}
+          onChange={(t) => updateTweak("theme", t)}
+        />
         <UserMenu me={me} />
       </header>
 
@@ -296,6 +311,7 @@ export default function App() {
           path="/insights"
           element={<WorkspaceInsights repos={repos} onOpen={handleOpenRepo} />}
         />
+        <Route path="/settings" element={<Settings />} />
         <Route
           path="/:owner/:repo"
           element={
@@ -320,7 +336,12 @@ export default function App() {
           label="Theme"
           value={tweaks.theme}
           options={["light", "dark"]}
-          onChange={(v) => updateTweak("theme", v)}
+          onChange={(v) => {
+            // Persist + apply via theme.ts so the radio, the header toggle, and
+            // localStorage stay in lockstep (one source of truth).
+            setTheme(v as Theme);
+            updateTweak("theme", v);
+          }}
         />
         <TweakSection label="Typography" />
         <TweakRadio

@@ -471,3 +471,81 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
 .sectiongap { height: var(--gap); }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ============================================================
+   M6 — theme toggle, rate-limit banner, collection grouping,
+   file-drop import, settings. Tokens reuse the existing design
+   system (--fg, --surface, --border, --amber, --accent, --radius).
+   ============================================================ */
+
+.theme-toggle { background: var(--surface-2); }
+
+/* Rate-limit banner */
+.rate-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--amber);
+  background: color-mix(in srgb, var(--amber) 12%, var(--surface));
+  color: var(--fg);
+  font-size: 14px;
+}
+.rate-banner.ok { display: none; }
+
+/* Collection grouping */
+.collection-group { margin: 28px 0; }
+.collection-group > h2 {
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.collection-group .actions { display: flex; gap: 6px; margin-left: auto; }
+
+/* File drop */
+.file-drop {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+}
+.file-drop.dragging { border-color: var(--accent); color: var(--fg); }
+
+/* Menu items rendered as <a>/<button> (Settings link, Sign out, profile) keep
+   visual parity with the original <div className="mi"> items. */
+.menu a.mi,
+.menu button.mi {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  text-decoration: none;
+}
+
+/* Inline form/import error text. */
+.form-error {
+  color: var(--red, #dc2626);
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+
+/* Settings + PAT honesty note */
+.settings-section { margin: 24px 0; max-width: 640px; }
+.note {
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--surface);
+  border-left: 3px solid var(--accent);
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin: 8px 0;
+}

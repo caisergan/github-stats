@@ -6,6 +6,8 @@ import {
   fmtRate,
   fmtNumber,
   fmtNullableTs,
+  avatarURL,
+  splitRepo,
 } from "./format";
 
 const NOW = new Date("2026-05-31T12:00:00Z").getTime();
@@ -40,5 +42,20 @@ describe("format", () => {
   it("fmtNullableTs handles null as 'never'", () => {
     expect(fmtNullableTs(null, NOW)).toBe("never");
     expect(fmtNullableTs("2026-05-31T11:00:00Z", NOW)).toBe("1h ago");
+  });
+});
+
+describe("avatarURL", () => {
+  it("builds a deterministic GitHub avatar URL from a login", () => {
+    expect(avatarURL("octocat")).toBe("https://avatars.githubusercontent.com/octocat?size=48");
+  });
+});
+
+describe("splitRepo", () => {
+  it("splits owner/name from a full_name", () => {
+    expect(splitRepo("octocat/Hello-World")).toEqual({ owner: "octocat", name: "Hello-World" });
+  });
+  it("tolerates names containing extra slashes by taking the first segment as owner", () => {
+    expect(splitRepo("acme/edge/cache")).toEqual({ owner: "acme", name: "edge/cache" });
   });
 });

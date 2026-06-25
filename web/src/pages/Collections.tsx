@@ -1,34 +1,56 @@
-import React, { useState, useMemo } from "react";
+import { useState } from "react";
 import { I } from "../components/Icons";
 import { Sparkline } from "../components/Charts";
-import { RepoCard } from "../components/Components";
-import * as D from "../data";
+import RepoCard from "../components/RepoCard";
+import { useAsync } from "../hooks/useAsync";
+import { fetchMetrics, fetchOverview } from "../api";
+import type {
+  Repo,
+  Collection,
+  MetricsMap,
+  SeriesPoint,
+  Overview as OverviewT,
+} from "../api";
+import { sumSeries } from "../aggregate";
+import * as F from "../format";
 
-const COL_ICONS: Record<string, React.ComponentType<any>> = {
-  server: I.server,
-  layout: I.layout,
-  globe: I.globe,
-  folder: I.folder,
-  layers: I.layers,
-};
+function seriesOf(m: MetricsMap, key: string): SeriesPoint[] {
+  const r = m[key];
+  return r && r.kind === "time_series" ? r.series : [];
+}
 
 interface CollectionCardProps {
-  col: D.MockCollection;
-  repos: D.MockRepo[];
-  onOpen: (col: D.MockCollection) => void;
+  col: Collection;
+  repos: Repo[];
+  onOpen: (col: Collection) => void;
 }
 
 function CollectionCard({ col, repos, onOpen }: CollectionCardProps) {
-  const members = repos.filter((r) => col.repoIds.includes(r.id));
-  const Ic = COL_ICONS[col.emoji] || I.folder;
-  const commits = Math.round(
-    members.reduce((a, r) => a + r.commit_rate, 0) * 10,
-  ) / 10;
-  const contributors = members.reduce((a, r) => a + r.contributors, 0);
-  const openPrs = members.reduce((a, r) => a + r.open_prs, 0);
-  const spark = useMemo(() => {
-    return D.aggregateSeries(members, "commit_rate", 90);
-  }, [col, members]);
+  const members = repos.filter((r) => col.repo_ids.includes(r.id));
+  const memberIds = members.map((r) => r.id);
+  const key = memberIds.join(",");
+
+  const state = useAsync(async () => {
+    if (memberIds.length === 0) {
+      return { spark: [] as SeriesPoint[], commits: 0, contributors: 0, openPrs: 0 };
+    }
+    const metricsList = await Promise.all(
+      memberIds.map((id) =>
+        fetchMetrics(id, { window: "90d", excludeBots: false, keys: ["commit_rate"] }),
+      ),
+    );
+    const overviews = await Promise.all(
+      memberIds.map((id) => fetchOverview(id, { window: "90d", excludeBots: false })),
+    );
+    return {
+      spark: sumSeries(metricsList.map((m) => seriesOf(m, "commit_rate"))),
+      commits: Math.round(overviews.reduce((a, o) => a + o.commit_rate, 0) * 10) / 10,
+      contributors: overviews.reduce((a, o) => a + o.contributors, 0),
+      openPrs: overviews.reduce((a, o) => a + o.open_prs, 0),
+    };
+  }, [key]);
+
+  const d = state.data ?? { spark: [], commits: 0, contributors: 0, openPrs: 0 };
 
   return (
     <div className="card hover repo-card fade-in" onClick={() => onOpen(col)}>
@@ -47,7 +69,7 @@ function CollectionCard({ col, repos, onOpen }: CollectionCardProps) {
               border: "1px solid var(--border)",
             }}
           >
-            <Ic style={{ width: 17, height: 17 }} />
+            <I.folder style={{ width: 17, height: 17 }} />
           </span>
           <div>
             <div className="rc-name" style={{ fontSize: 15 }}>
@@ -60,38 +82,31 @@ function CollectionCard({ col, repos, onOpen }: CollectionCardProps) {
         </div>
         <I.chevRight style={{ width: 16, height: 16, color: "var(--faint)" }} />
       </div>
-      <div className="rc-desc" style={{ WebkitLineClamp: 1 }}>
-        {col.desc}
-      </div>
       <div className="rc-spark">
-        <Sparkline series={spark} />
+        <Sparkline series={d.spark} />
       </div>
       <div className="rc-stats">
         <span className="rc-stat">
           <I.commit style={{ width: 14, height: 14 }} />
-          <b>{commits}</b>
+          <b>{d.commits}</b>
           <span className="muted">/d</span>
         </span>
         <span className="rc-stat">
           <I.users style={{ width: 14, height: 14 }} />
-          <b>{contributors}</b>
+          <b>{d.contributors}</b>
         </span>
         <span className="rc-stat">
           <I.pr style={{ width: 14, height: 14 }} />
-          <b>{openPrs}</b>
+          <b>{d.openPrs}</b>
         </span>
       </div>
       <div className="rc-foot" style={{ borderTop: "1px solid var(--border)" }}>
         <div className="row" style={{ gap: 4 }}>
-          {members.slice(0, 4).map((r) => (
-            <span key={r.id} className="lang" style={{ gap: 4 }}>
-              <span className="d" style={{ background: r.langColor }} />
-            </span>
-          ))}
           <span className="muted" style={{ fontSize: 12 }}>
-            {[...new Set(members.map((r) => r.lang))]
+            {members
               .slice(0, 3)
-              .join(" · ")}
+              .map((r) => F.splitRepo(r.full_name).name)
+              .join(" · ") || "No repositories yet"}
           </span>
         </div>
       </div>
@@ -100,30 +115,16 @@ function CollectionCard({ col, repos, onOpen }: CollectionCardProps) {
 }
 
 interface NewCollectionModalProps {
-  repos: D.MockRepo[];
   onClose: () => void;
-  onCreate: (col: D.MockCollection) => void;
+  onCreate: (name: string) => void;
 }
 
-function NewCollectionModal({
-  repos,
-  onClose,
-  onCreate,
-}: NewCollectionModalProps) {
+function NewCollectionModal({ onClose, onCreate }: NewCollectionModalProps) {
   const [name, setName] = useState("");
-  const [picked, setPicked] = useState<number[]>([]);
-  const toggle = (id: number) =>
-    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
   const create = () => {
-    if (!name.trim() || picked.length === 0) return;
-    onCreate({
-      id: "c" + Date.now(),
-      name: name.trim(),
-      desc: `${picked.length} repositories`,
-      emoji: "folder",
-      repoIds: picked,
-    });
+    if (!name.trim()) return;
+    onCreate(name.trim());
     onClose();
   };
 
@@ -160,7 +161,7 @@ function NewCollectionModal({
           New collection
         </h2>
         <p className="muted" style={{ margin: "0 0 18px", fontSize: 13.5 }}>
-          Group repositories to track them together.
+          Group repositories to track them together. Add repositories after creating it.
         </p>
         <label className="eyebrow" style={{ display: "block", marginBottom: 7 }}>
           Name
@@ -172,58 +173,6 @@ function NewCollectionModal({
           onChange={(e) => setName(e.target.value)}
           autoFocus
         />
-        <label
-          className="eyebrow"
-          style={{ display: "block", margin: "18px 0 9px" }}
-        >
-          Repositories ({picked.length} selected)
-        </label>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {repos.map((r) => {
-            const on = picked.includes(r.id);
-            return (
-              <div
-                key={r.id}
-                onClick={() => toggle(r.id)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "9px 11px",
-                  borderRadius: "var(--radius-sm)",
-                  cursor: "pointer",
-                  border: "1px solid " + (on ? "var(--accent)" : "var(--border)"),
-                  background: on ? "var(--accent-weak)" : "var(--surface)",
-                }}
-              >
-                <span
-                  style={{
-                    width: 17,
-                    height: 17,
-                    borderRadius: 5,
-                    border:
-                      "1.5px solid " +
-                      (on ? "var(--accent)" : "var(--border-strong)"),
-                    background: on ? "var(--accent)" : "transparent",
-                    display: "grid",
-                    placeItems: "center",
-                    color: "var(--accent-fg)",
-                    flex: "none",
-                  }}
-                >
-                  {on && <I.check style={{ width: 12, height: 12 }} />}
-                </span>
-                <span className="lang">
-                  <span className="d" style={{ background: r.langColor }} />
-                </span>
-                <span style={{ fontSize: 13.5, fontWeight: 500 }}>
-                  <span className="muted">{r.owner}/</span>
-                  {r.name}
-                </span>
-              </div>
-            );
-          })}
-        </div>
         <div
           className="row"
           style={{ justifyContent: "flex-end", gap: 9, marginTop: 20 }}
@@ -231,11 +180,7 @@ function NewCollectionModal({
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button
-            className="btn primary"
-            onClick={create}
-            disabled={!name.trim() || picked.length === 0}
-          >
+          <button className="btn primary" onClick={create} disabled={!name.trim()}>
             <I.plus style={{ width: 15, height: 15 }} />
             Create collection
           </button>
@@ -246,10 +191,10 @@ function NewCollectionModal({
 }
 
 interface CollectionsProps {
-  repos: D.MockRepo[];
-  collections: D.MockCollection[];
-  onOpenRepo: (repo: D.MockRepo) => void;
-  onCreate: (col: D.MockCollection) => void;
+  repos: Repo[];
+  collections: Collection[];
+  onOpenRepo: (repo: Repo) => void;
+  onCreate: (name: string) => void;
 }
 
 export default function Collections({
@@ -258,16 +203,25 @@ export default function Collections({
   onOpenRepo,
   onCreate,
 }: CollectionsProps) {
-  const [selected, setSelected] = useState<D.MockCollection | null>(null);
+  const [selected, setSelected] = useState<Collection | null>(null);
   const [modal, setModal] = useState(false);
 
+  // Fetch overviews for the selected collection's members (drives RepoCard).
+  const memberIds = selected
+    ? repos.filter((r) => selected.repo_ids.includes(r.id)).map((r) => r.id)
+    : [];
+  const memberKey = memberIds.join(",");
+  const ovState = useAsync<Record<number, OverviewT>>(async () => {
+    if (memberIds.length === 0) return {};
+    const list = await Promise.all(
+      memberIds.map((id) => fetchOverview(id, { window: "90d", excludeBots: false })),
+    );
+    return Object.fromEntries(list.map((o) => [o.id, o]));
+  }, [memberKey]);
+  const overviews = ovState.data ?? {};
+
   if (selected) {
-    const members = repos.filter((r) => selected.repoIds.includes(r.id));
-    const sparks: Record<number, D.MockMetricsMap> = {};
-    members.forEach((r) => {
-      sparks[r.id] = D.makeMetrics(r.seed, 90);
-    });
-    const Ic = COL_ICONS[selected.emoji] || I.folder;
+    const members = repos.filter((r) => selected.repo_ids.includes(r.id));
 
     return (
       <div className="page fade-in">
@@ -294,27 +248,29 @@ export default function Collections({
                 border: "1px solid var(--border)",
               }}
             >
-              <Ic style={{ width: 19, height: 19 }} />
+              <I.folder style={{ width: 19, height: 19 }} />
             </span>
             <div>
               <h1>{selected.name}</h1>
               <div className="meta">
                 <span className="m">{members.length} repositories</span>
-                <span className="m">{selected.desc}</span>
               </div>
             </div>
           </div>
         </div>
-        <div className="repo-grid" style={{ marginTop: 8 }}>
-          {members.map((r) => (
-            <RepoCard
-              key={r.id}
-              repo={r}
-              metrics={sparks[r.id]}
-              onOpen={onOpenRepo}
-            />
-          ))}
-        </div>
+        {members.length === 0 ? (
+          <div className="card pad" style={{ textAlign: "center", padding: 56 }}>
+            <div style={{ color: "var(--muted)" }}>
+              No repositories in this collection yet.
+            </div>
+          </div>
+        ) : (
+          <div className="repo-grid" style={{ marginTop: 8 }}>
+            {members.map((r) => (
+              <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} />
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -333,22 +289,21 @@ export default function Collections({
           New collection
         </button>
       </div>
-      <div className="repo-grid">
-        {collections.map((c) => (
-          <CollectionCard
-            key={c.id}
-            col={c}
-            repos={repos}
-            onOpen={setSelected}
-          />
-        ))}
-      </div>
+      {collections.length === 0 ? (
+        <div className="card pad" style={{ textAlign: "center", padding: 56 }}>
+          <div style={{ color: "var(--muted)" }}>
+            No collections yet — create one to group repositories.
+          </div>
+        </div>
+      ) : (
+        <div className="repo-grid">
+          {collections.map((c) => (
+            <CollectionCard key={c.id} col={c} repos={repos} onOpen={setSelected} />
+          ))}
+        </div>
+      )}
       {modal && (
-        <NewCollectionModal
-          repos={repos}
-          onClose={() => setModal(false)}
-          onCreate={onCreate}
-        />
+        <NewCollectionModal onClose={() => setModal(false)} onCreate={onCreate} />
       )}
     </div>
   );

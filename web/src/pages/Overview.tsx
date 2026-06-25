@@ -1,43 +1,50 @@
-import React, { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { I } from "../components/Icons";
 import { Select } from "../components/UI";
-import { Kpi, RepoCard, AddRepoForm } from "../components/Components";
+import { Kpi, AddRepoForm } from "../components/Components";
+import RepoCard from "../components/RepoCard";
 import { RateLimitBanner } from "../components/RateLimitBanner";
 import { CollectionManager } from "../components/CollectionManager";
 import { useCollections } from "../hooks/useCollections";
-import { fetchRateLimit, exportCollectionURL, type RateLimit } from "../api";
-import * as D from "../data";
+import { useAsync } from "../hooks/useAsync";
+import {
+  fetchRateLimit,
+  fetchOverview,
+  exportCollectionURL,
+  type RateLimit,
+  type Repo,
+  type Overview as OverviewT,
+} from "../api";
 import * as F from "../format";
 
 interface OverviewProps {
-  repos: D.MockRepo[];
-  onOpen: (repo: D.MockRepo) => void;
+  repos: Repo[];
+  onOpen: (repo: Repo) => void;
   onAdd: (fullName: string) => void;
 }
 
-export default function Overview({ repos, onOpen, onAdd }: OverviewProps) {
+export default function Overview({ repos, onAdd }: OverviewProps) {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("activity");
   const [status, setStatus] = useState("all");
 
-  // M6: live rate-limit snapshot + collections (from the JSON API). These are
-  // additive to the existing mock-data repo grid: when the backend has no
-  // collections (or the dev build runs on mock data) the groups are empty and
-  // every repo falls through to the main "Repositories" section below.
+  // M6: live rate-limit snapshot + collections (from the JSON API).
   const cols = useCollections();
   const [rate, setRate] = useState<RateLimit | null>(null);
   useEffect(() => {
     void fetchRateLimit().then(setRate).catch(() => setRate(null));
   }, []);
 
-  // per-repo light metrics for sparklines
-  const sparks = useMemo(() => {
-    const m: Record<number, D.MockMetricsMap> = {};
-    repos.forEach((r) => {
-      m[r.id] = D.makeMetrics(r.seed, 90);
-    });
-    return m;
-  }, [repos]);
+  // Per-repo headline counts come from the overview endpoint (the repo list
+  // itself carries no commit_rate/open_issues/etc). Fan out one fetch per repo.
+  const ids = repos.map((r) => r.id).join(",");
+  const ovState = useAsync<Record<number, OverviewT>>(async () => {
+    const list = await Promise.all(
+      repos.map((r) => fetchOverview(r.id, { window: "90d", excludeBots: false })),
+    );
+    return Object.fromEntries(list.map((o) => [o.id, o]));
+  }, [ids]);
+  const overviews = ovState.data ?? {};
 
   const filtered = useMemo(() => {
     let list = repos.filter(
@@ -48,28 +55,27 @@ export default function Overview({ repos, onOpen, onAdd }: OverviewProps) {
     if (status !== "all") {
       list = list.filter((r) => r.sync_status === status);
     }
-    const by: Record<string, (a: D.MockRepo, b: D.MockRepo) => number> = {
-      activity: (a, b) => b.commit_rate - a.commit_rate,
-      stars: (a, b) => b.stargazers - a.stargazers,
+    const by: Record<string, (a: Repo, b: Repo) => number> = {
+      activity: (a, b) => (overviews[b.id]?.commit_rate ?? 0) - (overviews[a.id]?.commit_rate ?? 0),
+      stars: (a, b) => (b.stargazers ?? 0) - (a.stargazers ?? 0),
       name: (a, b) => a.full_name.localeCompare(b.full_name),
-      issues: (a, b) => b.open_issues - a.open_issues,
+      issues: (a, b) => (overviews[b.id]?.open_issues ?? 0) - (overviews[a.id]?.open_issues ?? 0),
     };
     return [...list].sort(by[sort]);
-  }, [repos, q, sort, status]);
+  }, [repos, q, sort, status, overviews]);
 
-  // aggregate KPIs
+  // aggregate KPIs from the fetched overviews
   const agg = useMemo(() => {
-    const commits = repos.reduce((a, r) => a + r.commit_rate, 0);
-    const contributors = repos.reduce((a, r) => a + r.contributors, 0);
-    const openPrs = repos.reduce((a, r) => a + r.open_prs, 0);
-    const openIssues = repos.reduce((a, r) => a + r.open_issues, 0);
-    return {
-      commits: Math.round(commits * 10) / 10,
-      contributors,
-      openPrs,
-      openIssues,
-    };
-  }, [repos]);
+    return Object.values(overviews).reduce(
+      (a, o) => ({
+        commits: a.commits + o.commit_rate,
+        contributors: a.contributors + o.contributors,
+        openPrs: a.openPrs + o.open_prs,
+        openIssues: a.openIssues + o.open_issues,
+      }),
+      { commits: 0, contributors: 0, openPrs: 0, openIssues: 0 },
+    );
+  }, [overviews]);
 
   // M6: partition the (filtered) repos into one group per collection plus an
   // "Uncollected" remainder. Membership keys off the API collection's repo_ids.
@@ -110,7 +116,7 @@ export default function Overview({ repos, onOpen, onAdd }: OverviewProps) {
         <Kpi
           icon={I.commit}
           label="Commits / day"
-          value={agg.commits}
+          value={Math.round(agg.commits * 10) / 10}
           delta={12}
         />
         <Kpi
@@ -194,7 +200,7 @@ export default function Overview({ repos, onOpen, onAdd }: OverviewProps) {
               ) : (
                 <div className="repo-grid">
                   {members.map((r) => (
-                    <RepoCard key={r.id} repo={r} metrics={sparks[r.id]} onOpen={onOpen} />
+                    <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} />
                   ))}
                 </div>
               )}
@@ -205,7 +211,7 @@ export default function Overview({ repos, onOpen, onAdd }: OverviewProps) {
             <h2>Uncollected</h2>
             <div className="repo-grid">
               {collectionGroups.uncollected.map((r) => (
-                <RepoCard key={r.id} repo={r} metrics={sparks[r.id]} onOpen={onOpen} />
+                <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} />
               ))}
             </div>
           </section>
@@ -213,12 +219,7 @@ export default function Overview({ repos, onOpen, onAdd }: OverviewProps) {
       ) : (
         <div className="repo-grid">
           {filtered.map((r) => (
-            <RepoCard
-              key={r.id}
-              repo={r}
-              metrics={sparks[r.id]}
-              onOpen={onOpen}
-            />
+            <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} />
           ))}
         </div>
       )}

@@ -82,6 +82,28 @@ func TestMeReturnsUser(t *testing.T) {
 	}
 }
 
+func TestMeIncludesScopeAndPATFlag(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+	uid, _ := st.UpsertUser(ctx, &store.User{GitHubID: 3, Login: "morpheus"})
+	sess, _ := st.CreateSession(ctx, uid, time.Hour)
+	st.UpsertCredential(ctx, &store.Credential{UserID: uid, Kind: "oauth", EncToken: "x", Scopes: "read:user"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(&http.Cookie{Name: "gs_session", Value: sess.ID})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	var body map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["scopes"] != "read:user" {
+		t.Fatalf("scopes = %v, want read:user", body["scopes"])
+	}
+	if body["has_pat"] != false {
+		t.Fatalf("has_pat = %v, want false", body["has_pat"])
+	}
+}
+
 func TestUnknownAPIRouteReturnsJSON404(t *testing.T) {
 	srv, _ := testServer(t)
 	rec := httptest.NewRecorder()

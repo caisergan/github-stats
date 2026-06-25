@@ -59,6 +59,12 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 			pr.Get("/repos/{id}", s.repoOverview)
 			pr.Get("/repos/{id}/metrics", s.repoMetrics)
 			pr.Get("/repos/{id}/latest/{kind}", s.repoLatest)
+			pr.Get("/collections", s.listCollections)
+			pr.Post("/collections", s.createCollection)
+			pr.Patch("/collections/{id}", s.patchCollection)
+			pr.Delete("/collections/{id}", s.deleteCollection)
+			pr.Post("/collections/{id}/repos/{repoId}", s.addCollectionRepo)
+			pr.Delete("/collections/{id}/repos/{repoId}", s.removeCollectionRepo)
 		})
 	})
 

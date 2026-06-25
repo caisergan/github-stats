@@ -10,3 +10,4 @@
 /web/*.tsbuildinfo
 /web/vite.config.d.ts
 frontend-references/
+.DS_Store

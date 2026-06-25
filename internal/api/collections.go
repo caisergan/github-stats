@@ -32,16 +32,18 @@ func (s *Server) listCollections(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "list failed", http.StatusInternalServerError)
 		return
 	}
+	// One join query for all (collection_id -> repo_ids) instead of a per-collection
+	// ListCollectionRepos call (which avoids the 1+N query pattern).
+	repoIDs, err := s.store.ListUserCollectionRepoIDs(r.Context(), u.ID)
+	if err != nil {
+		http.Error(w, "list failed", http.StatusInternalServerError)
+		return
+	}
 	out := make([]collectionJSON, 0, len(cols))
 	for _, c := range cols {
-		repos, err := s.store.ListCollectionRepos(r.Context(), u.ID, c.ID)
-		if err != nil {
-			http.Error(w, "list failed", http.StatusInternalServerError)
-			return
-		}
-		ids := make([]int64, 0, len(repos))
-		for _, rp := range repos {
-			ids = append(ids, rp.ID)
+		ids := repoIDs[c.ID]
+		if ids == nil {
+			ids = []int64{}
 		}
 		out = append(out, collectionJSON{ID: c.ID, Name: c.Name, RepoIDs: ids})
 	}

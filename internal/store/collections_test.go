@@ -114,6 +114,57 @@ func TestCollectionRepoMembership(t *testing.T) {
 	}
 }
 
+func TestListUserCollectionRepoIDs(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	owner := seedUser(t, s)
+	other, _ := s.UpsertUser(ctx, &User{GitHubID: 2, Login: "other"})
+
+	c1, _ := s.CreateCollection(ctx, owner, "Web")
+	c2, _ := s.CreateCollection(ctx, owner, "Backend")
+	empty, _ := s.CreateCollection(ctx, owner, "Empty")
+	foreign, _ := s.CreateCollection(ctx, other, "Theirs")
+
+	r1 := seedNamedRepo(t, s, "octo/a", 10)
+	r2 := seedNamedRepo(t, s, "octo/b", 11)
+	r3 := seedNamedRepo(t, s, "octo/c", 12)
+
+	if err := s.AddRepoToCollection(ctx, owner, c1, r1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddRepoToCollection(ctx, owner, c1, r2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddRepoToCollection(ctx, owner, c2, r3); err != nil {
+		t.Fatal(err)
+	}
+	// Membership in the foreign user's collection must NOT leak.
+	if err := s.AddRepoToCollection(ctx, other, foreign, r1); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := s.ListUserCollectionRepoIDs(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the owner's non-empty collections appear.
+	if len(m) != 2 {
+		t.Fatalf("got %d collections in map, want 2: %+v", len(m), m)
+	}
+	if got := m[c1]; len(got) != 2 || got[0] != r1 || got[1] != r2 {
+		t.Fatalf("c1 repo ids = %v, want [%d %d] (insertion order)", got, r1, r2)
+	}
+	if got := m[c2]; len(got) != 1 || got[0] != r3 {
+		t.Fatalf("c2 repo ids = %v, want [%d]", got, r3)
+	}
+	if _, ok := m[empty]; ok {
+		t.Fatalf("empty collection should be absent from map, got %v", m[empty])
+	}
+	if _, ok := m[foreign]; ok {
+		t.Fatalf("foreign collection leaked into owner's map")
+	}
+}
+
 func TestAddRepoToForeignCollectionRejected(t *testing.T) {
 	s := openTemp(t)
 	ctx := context.Background()

@@ -46,6 +46,36 @@ func (s *Store) ListCollections(ctx context.Context, userID int64) ([]Collection
 	return out, rows.Err()
 }
 
+// ListUserCollectionRepoIDs returns, for every collection owned by userID, the
+// ordered list of member repo ids — in a single join query. This avoids the
+// 1+N pattern of calling ListCollectionRepos per collection when listing.
+// Collections with no repos are absent from the map (callers default to []).
+func (s *Store) ListUserCollectionRepoIDs(ctx context.Context, userID int64) (map[int64][]int64, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT cr.collection_id, cr.repo_id
+		FROM collection_repos cr
+		JOIN collections c ON c.id = cr.collection_id
+		WHERE c.user_id = ?
+		ORDER BY cr.collection_id, cr.created_at, cr.repo_id`, userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64][]int64)
+	for rows.Next() {
+		var collectionID, repoID int64
+		if err := rows.Scan(&collectionID, &repoID); err != nil {
+			return nil, err
+		}
+		out[collectionID] = append(out[collectionID], repoID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ownsCollection returns ErrNotFound if the collection is missing or not owned by userID.
 func (s *Store) ownsCollection(ctx context.Context, userID, collectionID int64) error {
 	var n int

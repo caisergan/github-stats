@@ -11,8 +11,8 @@ analytics without GitHub premium.
 2. `cp .env.example .env` and fill in `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
    and a key from `openssl rand -hex 32` as `ENCRYPTION_KEY`.
 3. Run the API: `make dev-api` (serves on :8080)
-4. In another terminal, run the frontend with HMR: `make dev-web` (serves on :5173,
-   proxies `/api` and `/auth` to :8080). Open http://localhost:5173.
+4. In another terminal, run the frontend with HMR: `make dev-web` (serves on :5175,
+   proxies `/api` and `/auth` to :8080). Open http://localhost:5175.
 
 ## Build (production single binary)
 

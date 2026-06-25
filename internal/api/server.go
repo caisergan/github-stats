@@ -44,7 +44,8 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 	// Auth routes.
 	r.Get("/auth/github", authSvc.Login)
 	r.Get("/auth/github/callback", authSvc.Callback)
-	r.Get("/auth/logout", authSvc.Logout)
+	r.Post("/auth/logout", authSvc.Logout)
+	r.Post("/auth/logout/all", authSvc.LogoutEverywhere)
 
 	// JSON API (auth-gated).
 	r.Route("/api", func(api chi.Router) {
@@ -71,6 +72,7 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 			pr.Put("/settings/pat", s.savePAT)
 			pr.Delete("/settings/pat", s.deletePAT)
 			pr.Get("/rate-limit", s.rateLimit)
+			pr.Get("/csrf", s.csrfToken)
 		})
 	})
 

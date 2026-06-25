@@ -111,11 +111,42 @@ func (s *Service) Callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-// Logout deletes the session and clears the cookie.
+// Logout deletes the current session (POST + CSRF). Replaces the M1 GET redirect.
 func (s *Service) Logout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.VerifyCSRF(r) {
+		http.Error(w, "csrf", http.StatusForbidden)
+		return
+	}
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		_ = s.Store.DeleteSession(r.Context(), c.Value)
 	}
+	s.clearSessionCookie(w)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// LogoutEverywhere deletes ALL of the user's sessions (POST + CSRF).
+func (s *Service) LogoutEverywhere(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.VerifyCSRF(r) {
+		http.Error(w, "csrf", http.StatusForbidden)
+		return
+	}
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		if sess, err := s.Store.GetSession(r.Context(), c.Value); err == nil {
+			_, _ = s.Store.DeleteSessionsForUser(r.Context(), sess.UserID)
+		}
+	}
+	s.clearSessionCookie(w)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Service) clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
-	http.Redirect(w, r, "/", http.StatusFound)
 }

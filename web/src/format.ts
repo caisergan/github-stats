@@ -32,7 +32,7 @@ export function fmtDateShort(iso: string): string {
 }
 
 /** Coarse relative time: "just now", "5m ago", "3h ago", "2d ago", "4mo ago". */
-export function fmtRelative(iso: string, now: number = new Date("2026-05-31T12:00:00Z").getTime()): string {
+export function fmtRelative(iso: string, now: number = Date.now()): string {
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return iso;
   const secs = Math.max(0, Math.floor((now - then) / 1000));
@@ -69,7 +69,7 @@ export function fmtNumber(n: number): string {
 }
 
 /** string|null timestamp -> relative time, or "never" when null/empty. */
-export function fmtNullableTs(iso: string | null, now: number = new Date("2026-05-31T12:00:00Z").getTime()): string {
+export function fmtNullableTs(iso: string | null, now: number = Date.now()): string {
   if (!iso) return "never";
   return fmtRelative(iso, now);
 }

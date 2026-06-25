@@ -43,6 +43,12 @@ func fakeDeltaGraphQL(t *testing.T) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		const rl = `"rateLimit":{"cost":1,"remaining":4990,"resetAt":"2026-06-01T13:00:00Z"}`
 		switch {
+		case strings.Contains(req.Query, "databaseId"):
+			w.Write([]byte(`{"data":{"repository":{"databaseId":1,"nameWithOwner":"octocat/hello",
+				"isPrivate":false,"description":"hi","stargazerCount":42,"forkCount":5,
+				"defaultBranchRef":{"name":"main"},
+				"primaryLanguage":{"name":"Go","color":"#00ADD8"},
+				"languages":{"totalSize":100,"edges":[{"size":80,"node":{"name":"Go","color":"#00ADD8"}},{"size":20,"node":{"name":"HTML","color":"#e34c26"}}]}},` + rl + `}}`))
 		case strings.Contains(req.Query, "since:"):
 			w.Write([]byte(`{"data":{"repository":{"ref":{"target":{"history":{
 				"pageInfo":{"endCursor":"DC1","hasNextPage":false},
@@ -115,6 +121,15 @@ func TestRunDeltaIngestsAndRecomputes(t *testing.T) {
 	if ss.LastCommitAt == nil || !ss.LastCommitAt.Equal(ptime("2026-05-20T08:00:00Z")) {
 		t.Fatalf("LastCommitAt = %v, want 2026-05-20T08:00:00Z", ss.LastCommitAt)
 	}
+
+	// Repo metadata refreshed during the delta (stars + language breakdown).
+	rp, _ := st.GetRepo(ctx, repoID)
+	if rp.Stargazers != 42 || rp.PrimaryLanguage != "Go" {
+		t.Fatalf("metadata not refreshed: stars=%d lang=%q", rp.Stargazers, rp.PrimaryLanguage)
+	}
+	if !strings.Contains(rp.Languages, `"name":"Go"`) || !strings.Contains(rp.Languages, `"name":"HTML"`) {
+		t.Fatalf("languages not refreshed: %s", rp.Languages)
+	}
 }
 
 func TestRunDeltaStopsAtOverlapCutoff(t *testing.T) {
@@ -133,6 +148,12 @@ func TestRunDeltaStopsAtOverlapCutoff(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		const rl = `"rateLimit":{"cost":1,"remaining":4990,"resetAt":"2026-06-01T13:00:00Z"}`
 		switch {
+		case strings.Contains(req.Query, "databaseId"):
+			w.Write([]byte(`{"data":{"repository":{"databaseId":1,"nameWithOwner":"octocat/hello",
+				"isPrivate":false,"description":"hi","stargazerCount":42,"forkCount":5,
+				"defaultBranchRef":{"name":"main"},
+				"primaryLanguage":{"name":"Go","color":"#00ADD8"},
+				"languages":{"totalSize":100,"edges":[{"size":80,"node":{"name":"Go","color":"#00ADD8"}},{"size":20,"node":{"name":"HTML","color":"#e34c26"}}]}},` + rl + `}}`))
 		case strings.Contains(req.Query, "since:"):
 			w.Write([]byte(`{"data":{"repository":{"ref":{"target":{"history":{
 				"pageInfo":{"endCursor":"","hasNextPage":false},"nodes":[]}}}}},` + rl + `}}`))

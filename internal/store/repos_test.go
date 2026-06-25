@@ -41,6 +41,7 @@ func TestUpsertRepoInsertsThenUpdates(t *testing.T) {
 		GitHubID: 100, FullName: "octocat/hello", IsPrivate: false,
 		DefaultBranch: "trunk", Description: "second", Stargazers: 9, Forks: 4,
 		PrimaryLanguage: "Go", LanguageColor: "#00ADD8",
+		Languages: `[{"name":"Go","color":"#00ADD8","size":80}]`,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +59,9 @@ func TestUpsertRepoInsertsThenUpdates(t *testing.T) {
 	}
 	if r.PrimaryLanguage != "Go" || r.LanguageColor != "#00ADD8" {
 		t.Fatalf("language not applied: %+v", r)
+	}
+	if r.Languages != `[{"name":"Go","color":"#00ADD8","size":80}]` {
+		t.Fatalf("languages not applied: %q", r.Languages)
 	}
 }
 

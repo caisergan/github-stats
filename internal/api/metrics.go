@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -59,26 +60,27 @@ func parseKeys(raw string) []string {
 
 // overviewJSON is the repo-card / details bundle (spec §8). M5 renders these.
 type overviewJSON struct {
-	ID            int64   `json:"id"`
-	FullName      string  `json:"full_name"`
-	IsPrivate     bool    `json:"is_private"`
-	DefaultBranch string  `json:"default_branch"`
-	Description   string  `json:"description"`
-	Stargazers    int64   `json:"stargazers"`
-	Forks         int64   `json:"forks"`
-	Language      string  `json:"language"`
-	LanguageColor string  `json:"language_color"`
-	OpenIssues    int64   `json:"open_issues"`
-	OpenPRs       int64   `json:"open_prs"`
-	Contributors  int64   `json:"contributors"`
-	CommitRate    float64 `json:"commit_rate"` // commits/day over the window
-	IssueRate     float64 `json:"issue_rate"`  // issues opened/day over the window
-	PRRate        float64 `json:"pr_rate"`     // PRs opened/day over the window
-	Releases      int64   `json:"releases"`
-	SyncStatus    string  `json:"sync_status"`
-	LastSyncedAt  *string `json:"last_synced_at"`
-	WindowFrom    string  `json:"window_from"`
-	WindowTo      string  `json:"window_to"`
+	ID            int64           `json:"id"`
+	FullName      string          `json:"full_name"`
+	IsPrivate     bool            `json:"is_private"`
+	DefaultBranch string          `json:"default_branch"`
+	Description   string          `json:"description"`
+	Stargazers    int64           `json:"stargazers"`
+	Forks         int64           `json:"forks"`
+	Language      string          `json:"language"`
+	LanguageColor string          `json:"language_color"`
+	Languages     json.RawMessage `json:"languages"`
+	OpenIssues    int64           `json:"open_issues"`
+	OpenPRs       int64           `json:"open_prs"`
+	Contributors  int64           `json:"contributors"`
+	CommitRate    float64         `json:"commit_rate"` // commits/day over the window
+	IssueRate     float64         `json:"issue_rate"`  // issues opened/day over the window
+	PRRate        float64         `json:"pr_rate"`     // PRs opened/day over the window
+	Releases      int64           `json:"releases"`
+	SyncStatus    string          `json:"sync_status"`
+	LastSyncedAt  *string         `json:"last_synced_at"`
+	WindowFrom    string          `json:"window_from"`
+	WindowTo      string          `json:"window_to"`
 }
 
 // repoOverview handles GET /api/repos/{id}: the repo metadata + headline numbers.
@@ -162,6 +164,7 @@ func (s *Server) buildOverview(ctx context.Context, repo *store.Repo, repoID int
 		Forks:         repo.Forks,
 		Language:      repo.PrimaryLanguage,
 		LanguageColor: repo.LanguageColor,
+		Languages:     rawLanguages(repo.Languages),
 		OpenIssues:    openIssues,
 		OpenPRs:       openPRs,
 		Contributors:  contributors,

@@ -29,6 +29,14 @@ func RunDelta(ctx context.Context, st *store.Store, client *githubapi.Client, re
 	}
 	owner, name := splitFullName(repo.FullName)
 
+	// Refresh repo metadata (stars/forks/language breakdown) so "Refresh now"
+	// keeps the card current. Best-effort: a metadata hiccup must not abort the
+	// delta sync of commits/PRs/issues.
+	if meta, mErr := client.FetchRepoMeta(ctx, owner, name); mErr == nil {
+		meta.ID = repo.ID
+		_, _ = st.UpsertRepo(ctx, meta)
+	}
+
 	ss, err := st.GetSyncState(ctx, repoID)
 	if err != nil {
 		return err

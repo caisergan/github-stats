@@ -37,6 +37,10 @@ func TestFetchRepoMeta(t *testing.T) {
 			"description":"hi", "stargazerCount":7, "forkCount":2,
 			"defaultBranchRef":{"name":"main"},
 			"primaryLanguage":{"name":"Go","color":"#00ADD8"},
+			"languages":{"totalSize":100,"edges":[
+				{"size":80,"node":{"name":"Go","color":"#00ADD8"}},
+				{"size":20,"node":{"name":"HTML","color":"#e34c26"}}
+			]},
 			"rateLimit":{"cost":1,"remaining":4999,"resetAt":"2026-04-01T13:00:00Z"}
 		}}}`,
 	}))
@@ -53,6 +57,9 @@ func TestFetchRepoMeta(t *testing.T) {
 	}
 	if r.PrimaryLanguage != "Go" || r.LanguageColor != "#00ADD8" {
 		t.Fatalf("language = %q/%q, want Go/#00ADD8", r.PrimaryLanguage, r.LanguageColor)
+	}
+	if r.Languages != `[{"name":"Go","color":"#00ADD8","size":80},{"name":"HTML","color":"#e34c26","size":20}]` {
+		t.Fatalf("languages breakdown = %s", r.Languages)
 	}
 }
 

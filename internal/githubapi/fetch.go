@@ -2,6 +2,7 @@ package githubapi
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github-stats/internal/store"
@@ -46,6 +47,10 @@ query($owner:String!, $name:String!) {
     forkCount
     defaultBranchRef { name }
     primaryLanguage { name color }
+    languages(first: 12, orderBy: {field: SIZE, direction: DESC}) {
+      totalSize
+      edges { size node { name color } }
+    }
   }
   rateLimit { cost remaining resetAt }
 }`
@@ -68,6 +73,15 @@ func (c *Client) FetchRepoMeta(ctx context.Context, owner, name string) (*store.
 				Name  string `json:"name"`
 				Color string `json:"color"`
 			} `json:"primaryLanguage"`
+			Languages struct {
+				Edges []struct {
+					Size int64 `json:"size"`
+					Node struct {
+						Name  string `json:"name"`
+						Color string `json:"color"`
+					} `json:"node"`
+				} `json:"edges"`
+			} `json:"languages"`
 		} `json:"repository"`
 		RateLimit RateLimit `json:"rateLimit"`
 	}
@@ -85,6 +99,22 @@ func (c *Client) FetchRepoMeta(ctx context.Context, owner, name string) (*store.
 		Forks:           data.Repository.ForkCount,
 		PrimaryLanguage: data.Repository.PrimaryLanguage.Name,
 		LanguageColor:   data.Repository.PrimaryLanguage.Color,
+	}
+	// Marshal the language breakdown (name/color/size, desc by size) to JSON for
+	// the repos.languages column; always at least "[]".
+	type langEntry struct {
+		Name  string `json:"name"`
+		Color string `json:"color"`
+		Size  int64  `json:"size"`
+	}
+	langs := make([]langEntry, 0, len(data.Repository.Languages.Edges))
+	for _, e := range data.Repository.Languages.Edges {
+		langs = append(langs, langEntry{Name: e.Node.Name, Color: e.Node.Color, Size: e.Size})
+	}
+	if b, err := json.Marshal(langs); err == nil {
+		r.Languages = string(b)
+	} else {
+		r.Languages = "[]"
 	}
 	return r, nil
 }

@@ -18,14 +18,15 @@ type Repo struct {
 	Forks           int64
 	PrimaryLanguage string // e.g. "Go" ("" when GitHub reports none)
 	LanguageColor   string // e.g. "#00ADD8"
+	Languages       string // JSON array [{name,color,size}], desc by size; default "[]"
 	CreatedAt       time.Time
 }
 
 // UpsertRepo inserts or updates a repo by github_id and returns the local id.
 func (s *Store) UpsertRepo(ctx context.Context, r *Repo) (int64, error) {
 	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO repos (github_id, full_name, is_private, default_branch, description, stargazers, forks, primary_language, language_color)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO repos (github_id, full_name, is_private, default_branch, description, stargazers, forks, primary_language, language_color, languages)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(github_id) DO UPDATE SET
 			full_name = excluded.full_name,
 			is_private = excluded.is_private,
@@ -34,9 +35,10 @@ func (s *Store) UpsertRepo(ctx context.Context, r *Repo) (int64, error) {
 			stargazers = excluded.stargazers,
 			forks = excluded.forks,
 			primary_language = excluded.primary_language,
-			language_color = excluded.language_color`,
+			language_color = excluded.language_color,
+			languages = excluded.languages`,
 		r.GitHubID, r.FullName, boolToInt(r.IsPrivate), r.DefaultBranch,
-		r.Description, r.Stargazers, r.Forks, r.PrimaryLanguage, r.LanguageColor,
+		r.Description, r.Stargazers, r.Forks, r.PrimaryLanguage, r.LanguageColor, languagesOrEmpty(r.Languages),
 	)
 	if err != nil {
 		return 0, err
@@ -60,14 +62,23 @@ func (s *Store) GetRepoByFullName(ctx context.Context, fullName string) (*Repo, 
 	return s.scanRepo(s.DB.QueryRowContext(ctx, repoSelect+` WHERE full_name = ?`, fullName))
 }
 
+// languagesOrEmpty guards the NOT NULL languages column against a zero-value
+// Repo (e.g. metadata built before the languages query existed).
+func languagesOrEmpty(s string) string {
+	if s == "" {
+		return "[]"
+	}
+	return s
+}
+
 const repoSelect = `SELECT id, github_id, full_name, is_private, default_branch,
-	description, stargazers, forks, primary_language, language_color, created_at FROM repos`
+	description, stargazers, forks, primary_language, language_color, languages, created_at FROM repos`
 
 func (s *Store) scanRepo(row *sql.Row) (*Repo, error) {
 	var r Repo
 	var priv int
 	err := row.Scan(&r.ID, &r.GitHubID, &r.FullName, &priv, &r.DefaultBranch,
-		&r.Description, &r.Stargazers, &r.Forks, &r.PrimaryLanguage, &r.LanguageColor, &r.CreatedAt)
+		&r.Description, &r.Stargazers, &r.Forks, &r.PrimaryLanguage, &r.LanguageColor, &r.Languages, &r.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}

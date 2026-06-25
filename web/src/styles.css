@@ -308,6 +308,16 @@ a { color: inherit; text-decoration: none; }
 .repo-card .rc-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 .repo-card .rc-foot .synced { font-size: 11.5px; color: var(--faint); }
 
+/* Language distribution bar (top 2 languages + "Other"). */
+.lang-bar-wrap { display: flex; flex-direction: column; gap: 8px; }
+.lang-bar { display: flex; height: 8px; border-radius: 99px; overflow: hidden; background: var(--surface-2); gap: 2px; }
+.lang-bar > span { display: block; height: 100%; min-width: 2px; }
+.lang-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
+.lang-leg { display: inline-flex; align-items: center; gap: 5px; }
+.lang-leg .d { width: 9px; height: 9px; border-radius: 99px; flex: none; }
+.lang-leg b { color: var(--fg-2); font-weight: 600; }
+.lang-leg .pct { color: var(--muted); }
+
 /* lang dot */
 .lang { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .lang .d { width: 9px; height: 9px; border-radius: 99px; }

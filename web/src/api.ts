@@ -81,6 +81,13 @@ export async function fetchMe(): Promise<Me | null> {
 
 export type SyncStatus = "pending" | "running" | "complete" | "error" | "" | string;
 
+/** One entry of a repo's language breakdown (bytes), as returned by the API. */
+export interface RepoLang {
+  name: string;
+  color: string;
+  size: number;
+}
+
 export interface Repo {
   id: number;
   full_name: string;
@@ -91,6 +98,7 @@ export interface Repo {
   forks?: number;
   language?: string;
   language_color?: string;
+  languages?: RepoLang[];
   sync_status: SyncStatus;
   last_synced_at: string | null;
 }
@@ -204,6 +212,7 @@ export interface Overview {
   forks: number;
   language?: string;
   language_color?: string;
+  languages?: RepoLang[];
   open_issues: number;
   open_prs: number;
   contributors: number;

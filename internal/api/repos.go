@@ -15,17 +15,18 @@ import (
 
 // repoJSON is the wire shape for a tracked repo (M4/M5 depend on these keys).
 type repoJSON struct {
-	ID            int64   `json:"id"`
-	FullName      string  `json:"full_name"`
-	IsPrivate     bool    `json:"is_private"`
-	DefaultBranch string  `json:"default_branch"`
-	Description   string  `json:"description"`
-	Stargazers    int64   `json:"stargazers"`
-	Forks         int64   `json:"forks"`
-	Language      string  `json:"language"`
-	LanguageColor string  `json:"language_color"`
-	SyncStatus    string  `json:"sync_status"`
-	LastSyncedAt  *string `json:"last_synced_at"`
+	ID            int64           `json:"id"`
+	FullName      string          `json:"full_name"`
+	IsPrivate     bool            `json:"is_private"`
+	DefaultBranch string          `json:"default_branch"`
+	Description   string          `json:"description"`
+	Stargazers    int64           `json:"stargazers"`
+	Forks         int64           `json:"forks"`
+	Language      string          `json:"language"`
+	LanguageColor string          `json:"language_color"`
+	Languages     json.RawMessage `json:"languages"`
+	SyncStatus    string          `json:"sync_status"`
+	LastSyncedAt  *string         `json:"last_synced_at"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -188,6 +189,15 @@ func repoIDParam(r *http.Request) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 }
 
+// rawLanguages passes the stored languages JSON through as-is, defaulting an
+// empty value to an empty array so the response stays valid JSON.
+func rawLanguages(s string) json.RawMessage {
+	if s == "" {
+		return json.RawMessage("[]")
+	}
+	return json.RawMessage(s)
+}
+
 func toRepoJSON(repo *store.Repo, repoID int64, ss *store.SyncState) repoJSON {
 	j := repoJSON{
 		ID:            repoID,
@@ -199,6 +209,7 @@ func toRepoJSON(repo *store.Repo, repoID int64, ss *store.SyncState) repoJSON {
 		Forks:         repo.Forks,
 		Language:      repo.PrimaryLanguage,
 		LanguageColor: repo.LanguageColor,
+		Languages:     rawLanguages(repo.Languages),
 	}
 	if ss != nil {
 		j.SyncStatus = ss.Status

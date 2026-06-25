@@ -3,6 +3,7 @@ import type { Repo, Overview, SeriesPoint } from "../api";
 import { I } from "./Icons";
 import { SyncStatusBadge, LangDot } from "./UI";
 import { Sparkline } from "./Charts";
+import LanguageBar from "./LanguageBar";
 import { fmtNullableTs, fmtNumber, splitRepo } from "../format";
 
 interface Props {
@@ -17,6 +18,7 @@ export default function RepoCard({ repo, overview, series }: Props) {
   const forks = overview?.forks ?? repo.forks ?? 0;
   const lang = overview?.language || repo.language || "";
   const langColor = overview?.language_color || repo.language_color || "var(--muted)";
+  const languages = overview?.languages ?? repo.languages ?? [];
 
   return (
     <Link
@@ -67,8 +69,14 @@ export default function RepoCard({ repo, overview, series }: Props) {
         </span>
       </div>
 
+      {languages.length > 0 && <LanguageBar languages={languages} />}
+
       <div className="rc-foot">
-        {lang ? <LangDot name={lang} color={langColor} /> : <span />}
+        {languages.length === 0 && lang ? (
+          <LangDot name={lang} color={langColor} />
+        ) : (
+          <span />
+        )}
         <span className="synced">synced {fmtNullableTs(repo.last_synced_at)}</span>
       </div>
     </Link>

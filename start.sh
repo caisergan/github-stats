@@ -43,7 +43,7 @@ LAST_HASH=$(get_go_hash)
 
 echo "--------------------------------------------------------"
 echo "Development environment is ready!"
-echo "- Frontend is running at: http://localhost:5175"
+echo "- Frontend is running at: http://localhost:${WEB_PORT:-5175}"
 echo "- Backend API is running at: http://localhost:8080"
 echo "- Watching Go files for auto-restart..."
 echo "--------------------------------------------------------"

@@ -13,6 +13,7 @@ analytics without GitHub premium.
 3. Run the API: `make dev-api` (serves on :8080)
 4. In another terminal, run the frontend with HMR: `make dev-web` (serves on :5175,
    proxies `/api` and `/auth` to :8080). Open http://localhost:5175.
+   - To change the frontend port, set `WEB_PORT` in `.env` (read by `web/vite.config.ts`).
 
 ## Build (production single binary)
 

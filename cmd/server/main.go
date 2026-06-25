@@ -69,6 +69,10 @@ func main() {
 	engine.Start(rootCtx)
 	defer engine.Stop()
 
+	// Periodically remove expired sessions: one pass at startup, then on a
+	// ticker. The goroutine stops when rootCtx is cancelled (graceful shutdown).
+	startSessionSweeper(rootCtx, st, time.Hour)
+
 	srv := api.NewServer(cfg, st, authSvc, engine, cipher)
 	httpSrv := &http.Server{Addr: cfg.Addr, Handler: srv}
 
@@ -86,6 +90,31 @@ func main() {
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown: %v", err)
 	}
+}
+
+// startSessionSweeper sweeps expired sessions once immediately, then every interval
+// until ctx is cancelled.
+func startSessionSweeper(ctx context.Context, st *store.Store, interval time.Duration) {
+	sweep := func() {
+		if n, err := st.DeleteExpiredSessions(context.Background(), time.Now().UTC()); err != nil {
+			log.Printf("session sweep: %v", err)
+		} else if n > 0 {
+			log.Printf("session sweep: removed %d expired sessions", n)
+		}
+	}
+	sweep() // startup pass
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				sweep()
+			}
+		}
+	}()
 }
 
 // newClientFactory builds a gosync.ClientFactory that resolves a repo to a

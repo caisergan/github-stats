@@ -74,4 +74,19 @@ describe("Overview page", () => {
     renderPage([]);
     await waitFor(() => expect(screen.getByText(/no repositories match/i)).toBeInTheDocument());
   });
+
+  it("surfaces an error when onAdd rejects instead of silently swallowing it", async () => {
+    const onAdd = vi
+      .fn()
+      .mockRejectedValue(new Error("fetch repo failed: graphql: empty data"));
+    renderPage(REPOS, onAdd);
+
+    const input = screen.getByPlaceholderText("owner/name");
+    await userEvent.type(input, "caisergan/trade-station");
+    await userEvent.click(screen.getByRole("button", { name: /track repo/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/fetch repo failed/i)).toBeInTheDocument(),
+    );
+  });
 });

@@ -71,7 +71,7 @@ export function MetricCard({
 }
 
 interface AddRepoFormProps {
-  onAdd: (fullName: string) => void;
+  onAdd: (fullName: string) => Promise<unknown>;
 }
 
 export function AddRepoForm({ onAdd }: AddRepoFormProps) {
@@ -79,7 +79,7 @@ export function AddRepoForm({ onAdd }: AddRepoFormProps) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const v = val.trim();
     if (!/^[\w.-]+\/[\w.-]+$/.test(v)) {
@@ -88,11 +88,14 @@ export function AddRepoForm({ onAdd }: AddRepoFormProps) {
     }
     setErr("");
     setBusy(true);
-    setTimeout(() => {
-      onAdd(v);
+    try {
+      await onAdd(v);
       setVal("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to track repository.");
+    } finally {
       setBusy(false);
-    }, 450);
+    }
   };
 
   return (
@@ -104,6 +107,7 @@ export function AddRepoForm({ onAdd }: AddRepoFormProps) {
             className="input"
             placeholder="owner/name"
             value={val}
+            disabled={busy}
             onChange={(e) => {
               setVal(e.target.value);
               setErr("");

@@ -20,7 +20,7 @@ import * as F from "../format";
 interface OverviewProps {
   repos: Repo[];
   onOpen: (repo: Repo) => void;
-  onAdd: (fullName: string) => void;
+  onAdd: (fullName: string) => Promise<unknown>;
 }
 
 export default function Overview({ repos, onAdd }: OverviewProps) {

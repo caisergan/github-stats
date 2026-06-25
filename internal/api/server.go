@@ -51,6 +51,7 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 	r.Route("/api", func(api chi.Router) {
 		api.Group(func(pr chi.Router) {
 			pr.Use(authSvc.RequireUser)
+			pr.Use(authSvc.RequireCSRF)
 			pr.Get("/me", s.me)
 			pr.Post("/repos", s.addRepo)
 			pr.Get("/repos", s.listRepos)

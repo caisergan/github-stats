@@ -5,21 +5,16 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
-	"strings"
 )
 
 const csrfCookie = "gs_csrf"
 
-// secureCookiesFromConfig derives the cookie Secure flag without an *http.Request,
-// from the configured BaseURL scheme. Used for cookies issued outside a
-// request-derived TLS context (e.g. the CSRF token endpoint, logout clears).
-func (s *Service) secureCookiesFromConfig() bool {
-	return strings.HasPrefix(s.Cfg.BaseURL, "https://")
-}
-
 // IssueCSRF generates a CSRF token, sets it as a readable (non-httpOnly) cookie
 // for the double-submit pattern, and returns it for the client to echo in a header.
-func (s *Service) IssueCSRF(w http.ResponseWriter) string {
+// The Secure flag is derived from the request (TLS / X-Forwarded-Proto / BaseURL)
+// so the cookie behaves identically to the session/state cookies behind a
+// TLS-terminating proxy.
+func (s *Service) IssueCSRF(w http.ResponseWriter, r *http.Request) string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return ""
@@ -30,10 +25,28 @@ func (s *Service) IssueCSRF(w http.ResponseWriter) string {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: false, // must be readable by JS to echo into the header
-		Secure:   s.secureCookiesFromConfig(),
+		Secure:   s.secureCookies(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	return token
+}
+
+// RequireCSRF is middleware that enforces the double-submit CSRF check on unsafe
+// (state-changing) HTTP methods. Safe methods (GET, HEAD, OPTIONS) are exempt so
+// reads, SSE streams, and export/token endpoints keep working without a token.
+func (s *Service) RequireCSRF(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			// Safe methods: no CSRF token required.
+		default:
+			if !s.VerifyCSRF(r) {
+				http.Error(w, "csrf", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // VerifyCSRF checks the double-submit token: the gs_csrf cookie must match the

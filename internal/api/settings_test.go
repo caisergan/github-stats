@@ -30,6 +30,7 @@ func TestSavePATValidatesAndStores(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"token": "good_pat"})
 	req := httptest.NewRequest(http.MethodPut, "/api/settings/pat", bytes.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	withCSRF(req)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -70,6 +71,7 @@ func TestSavePATRejectsInvalid(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"token": "bad"})
 	req := httptest.NewRequest(http.MethodPut, "/api/settings/pat", bytes.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	withCSRF(req)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -85,6 +87,7 @@ func TestDeletePAT(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/settings/pat", nil)
 	req.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	withCSRF(req)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {

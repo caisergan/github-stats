@@ -12,6 +12,6 @@ func (s *Server) csrfToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	token := s.auth.IssueCSRF(w)
+	token := s.auth.IssueCSRF(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"csrf_token": token})
 }

@@ -50,6 +50,15 @@ func testServer(t *testing.T) (*Server, *store.Store) {
 	return testServerWithGitHub(t, "http://unused")
 }
 
+// withCSRF attaches a matching gs_csrf cookie + X-CSRF-Token header so a request
+// passes the double-submit CSRF check enforced on unsafe API methods.
+func withCSRF(req *http.Request) *http.Request {
+	const tok = "test-csrf-token"
+	req.AddCookie(&http.Cookie{Name: "gs_csrf", Value: tok})
+	req.Header.Set("X-CSRF-Token", tok)
+	return req
+}
+
 func TestMeUnauthorized(t *testing.T) {
 	srv, _ := testServer(t)
 	rec := httptest.NewRecorder()

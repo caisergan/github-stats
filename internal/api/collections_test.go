@@ -55,6 +55,7 @@ func TestCollectionsCreateListAndGroup(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"name": "Backend"})
 	req := httptest.NewRequest(http.MethodPost, "/api/collections", bytes.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	withCSRF(req)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
@@ -73,6 +74,7 @@ func TestCollectionsCreateListAndGroup(t *testing.T) {
 	addReq := httptest.NewRequest(http.MethodPost,
 		"/api/collections/"+itoa(created.ID)+"/repos/"+itoa(rid), nil)
 	addReq.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	withCSRF(addReq)
 	addRec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(addRec, addReq)
 	if addRec.Code != http.StatusNoContent {
@@ -98,6 +100,31 @@ func TestCollectionsCreateListAndGroup(t *testing.T) {
 	}
 }
 
+func TestMutatingRequestWithoutCSRFRejected(t *testing.T) {
+	srv, st := testServer(t)
+	_, sid := loginSession(t, st, "neo", 7)
+
+	// Authenticated (valid session) but no CSRF cookie/header → 403, and no
+	// collection is created.
+	body, _ := json.Marshal(map[string]string{"name": "Backend"})
+	req := httptest.NewRequest(http.MethodPost, "/api/collections", bytes.NewReader(body))
+	req.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 without CSRF token", rec.Code)
+	}
+
+	// A safe (GET) request on the same group still works without a token.
+	greq := httptest.NewRequest(http.MethodGet, "/api/collections", nil)
+	greq.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	grec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(grec, greq)
+	if grec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200 (safe method exempt from CSRF)", grec.Code)
+	}
+}
+
 func TestCollectionPatchDelete(t *testing.T) {
 	srv, st := testServer(t)
 	uid, sid := loginSession(t, st, "neo", 7)
@@ -107,6 +134,7 @@ func TestCollectionPatchDelete(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"name": "New"})
 	preq := httptest.NewRequest(http.MethodPatch, "/api/collections/"+itoa(cid), bytes.NewReader(body))
 	preq.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	withCSRF(preq)
 	prec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(prec, preq)
 	if prec.Code != http.StatusOK {
@@ -116,6 +144,7 @@ func TestCollectionPatchDelete(t *testing.T) {
 	// DELETE.
 	dreq := httptest.NewRequest(http.MethodDelete, "/api/collections/"+itoa(cid), nil)
 	dreq.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	withCSRF(dreq)
 	drec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(drec, dreq)
 	if drec.Code != http.StatusNoContent {
@@ -133,6 +162,7 @@ func TestCollectionForbiddenForOtherUser(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"name": "Hijacked"})
 	req := httptest.NewRequest(http.MethodPatch, "/api/collections/"+itoa(cid), bytes.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: "gs_session", Value: otherSid})
+	withCSRF(req)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -176,6 +206,7 @@ func TestImportManifestParse(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/import?kind=package_json",
 		bytes.NewReader([]byte(`{"dependencies":{"@acme/x":"1.0.0","react":"18"}}`)))
 	req.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	withCSRF(req)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

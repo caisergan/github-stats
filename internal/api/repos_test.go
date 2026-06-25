@@ -78,6 +78,7 @@ func TestAddRepoFetchesTracksAndEnqueues(t *testing.T) {
 	body := strings.NewReader(`{"full_name":"octocat/hello"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/repos", body)
 	req.AddCookie(cookie)
+	withCSRF(req)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
 
@@ -109,6 +110,7 @@ func TestAddRepoRejectsBadBody(t *testing.T) {
 	srv, _, cookie := serverWithGitHub(t, "http://unused")
 	req := httptest.NewRequest(http.MethodPost, "/api/repos", strings.NewReader(`{"full_name":""}`))
 	req.AddCookie(cookie)
+	withCSRF(req)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -161,6 +163,7 @@ func TestUntrackRepo(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/repos/"+strconv.FormatInt(repoID, 10), nil)
 	req.AddCookie(cookie)
+	withCSRF(req)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
 
@@ -180,6 +183,7 @@ func TestRefreshRepoEnqueuesDelta(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/repos/"+strconv.FormatInt(repoID, 10)+"/refresh", nil)
 	req.AddCookie(cookie)
+	withCSRF(req)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
 
@@ -200,6 +204,7 @@ func TestRefreshRejectsUntrackedRepo(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/repos/"+strconv.FormatInt(repoID, 10)+"/refresh", nil)
 	req.AddCookie(cookie)
+	withCSRF(req)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {

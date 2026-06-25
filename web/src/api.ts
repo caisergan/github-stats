@@ -30,6 +30,8 @@ export interface Me {
   github_id: number;
   login: string;
   avatar_url: string;
+  scopes?: string;
+  has_pat?: boolean;
 }
 
 export async function fetchMe(): Promise<Me | null> {
@@ -283,4 +285,163 @@ export function openSyncStream(repoID: number, h: SyncStreamHandlers): SyncStrea
     h.onError?.(e);
   };
   return { close: () => es.close() };
+}
+
+// ---------------------------------------------------------------------------
+// Collections (M6)
+// ---------------------------------------------------------------------------
+
+export interface Collection {
+  id: number;
+  name: string;
+  repo_ids: number[];
+}
+
+export function listCollections(): Promise<Collection[]> {
+  return getJSON<Collection[]>("/api/collections");
+}
+
+export async function createCollection(name: string): Promise<Collection> {
+  const res = await fetch("/api/collections", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw await asError(res, "/api/collections");
+  return (await res.json()) as Collection;
+}
+
+export async function renameCollection(id: number, name: string): Promise<void> {
+  const res = await fetch(`/api/collections/${id}`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw await asError(res, `/api/collections/${id}`);
+}
+
+export async function deleteCollection(id: number): Promise<void> {
+  const res = await fetch(`/api/collections/${id}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+  });
+  if (!res.ok && res.status !== 204) throw await asError(res, `/api/collections/${id}`);
+}
+
+export async function addRepoToCollection(collectionID: number, repoID: number): Promise<void> {
+  const res = await fetch(`/api/collections/${collectionID}/repos/${repoID}`, {
+    method: "POST",
+    credentials: "same-origin",
+  });
+  if (!res.ok && res.status !== 204) {
+    throw await asError(res, `/api/collections/${collectionID}/repos/${repoID}`);
+  }
+}
+
+export async function removeRepoFromCollection(collectionID: number, repoID: number): Promise<void> {
+  const res = await fetch(`/api/collections/${collectionID}/repos/${repoID}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+  });
+  if (!res.ok && res.status !== 204) {
+    throw await asError(res, `/api/collections/${collectionID}/repos/${repoID}`);
+  }
+}
+
+export function exportCollectionURL(id: number): string {
+  return `/api/collections/${id}/export`;
+}
+
+// ---------------------------------------------------------------------------
+// Import (M6)
+// ---------------------------------------------------------------------------
+
+export interface ImportResult {
+  resolved: string[];
+  unresolved: string[];
+}
+
+export async function importManifest(
+  kind: "package_json" | "requirements_txt" | "collection",
+  body: string,
+): Promise<ImportResult> {
+  const res = await fetch(`/api/import?kind=${kind}`, {
+    method: "POST",
+    credentials: "same-origin",
+    body,
+  });
+  if (!res.ok) throw await asError(res, "/api/import");
+  return (await res.json()) as ImportResult;
+}
+
+// ---------------------------------------------------------------------------
+// PAT settings (M6)
+// ---------------------------------------------------------------------------
+
+export interface PatStatus {
+  has_pat: boolean;
+  login?: string;
+}
+
+export function getPatStatus(): Promise<PatStatus> {
+  return getJSON<PatStatus>("/api/settings/pat");
+}
+
+export async function savePat(token: string): Promise<PatStatus> {
+  const res = await fetch("/api/settings/pat", {
+    method: "PUT",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) throw await asError(res, "/api/settings/pat");
+  return (await res.json()) as PatStatus;
+}
+
+export async function deletePat(): Promise<void> {
+  const res = await fetch("/api/settings/pat", {
+    method: "DELETE",
+    credentials: "same-origin",
+  });
+  if (!res.ok && res.status !== 204) throw await asError(res, "/api/settings/pat");
+}
+
+// ---------------------------------------------------------------------------
+// Rate limit (M6)
+// ---------------------------------------------------------------------------
+
+export interface RateBucket {
+  remaining: number;
+  reset: string;
+}
+export interface RateLimit {
+  rest: RateBucket;
+  graphql: RateBucket;
+}
+
+export function fetchRateLimit(): Promise<RateLimit> {
+  return getJSON<RateLimit>("/api/rate-limit");
+}
+
+// ---------------------------------------------------------------------------
+// CSRF + logout (M6)
+// ---------------------------------------------------------------------------
+
+export async function fetchCsrfToken(): Promise<string> {
+  const res = await fetch("/api/csrf", { credentials: "same-origin" });
+  if (!res.ok) throw await asError(res, "/api/csrf");
+  return ((await res.json()) as { csrf_token: string }).csrf_token;
+}
+
+export async function logout(everywhere = false): Promise<void> {
+  const token = await fetchCsrfToken();
+  const path = everywhere ? "/auth/logout/all" : "/auth/logout";
+  const res = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "X-CSRF-Token": token },
+  });
+  if (!res.ok && res.status !== 204) throw await asError(res, path);
 }

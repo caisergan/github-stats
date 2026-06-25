@@ -12,6 +12,7 @@ import {
   metricsURL,
   overviewURL,
   latestURL,
+  exportCollectionURL,
   type Result,
 } from "./api";
 
@@ -48,6 +49,12 @@ describe("URL builders", () => {
 
   it("latestURL encodes kind + limit", () => {
     expect(latestURL(9, "prs", 50)).toBe("/api/repos/9/latest/prs?limit=50");
+  });
+});
+
+describe("collection export url (M6)", () => {
+  it("builds the export path", () => {
+    expect(exportCollectionURL(42)).toBe("/api/collections/42/export");
   });
 });
 

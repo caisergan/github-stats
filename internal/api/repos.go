@@ -32,9 +32,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// userClient mints a per-user GitHub client from the caller's decrypted oauth token.
+// userClient mints a per-user GitHub client, preferring a stored fine-grained PAT
+// over the OAuth token when present (an alternate credential — NOT a rate-limit bump,
+// since GitHub's 5,000/hr bucket is shared across a user's OAuth + PATs; see spec §3).
 func (s *Server) userClient(r *http.Request, userID int64) (*githubapi.Client, error) {
-	cred, err := s.store.GetCredential(r.Context(), userID, "oauth")
+	cred, err := s.store.GetCredential(r.Context(), userID, "pat")
+	if err == store.ErrNotFound {
+		cred, err = s.store.GetCredential(r.Context(), userID, "oauth")
+	}
 	if err != nil {
 		return nil, err
 	}

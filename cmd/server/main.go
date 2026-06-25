@@ -100,7 +100,10 @@ func newClientFactory(st *store.Store, cipher *crypto.Cipher, cfg config.Config)
 		).Scan(&userID); err != nil {
 			return nil, err
 		}
-		cred, err := st.GetCredential(ctx, userID, "oauth")
+		cred, err := st.GetCredential(ctx, userID, "pat")
+		if err == store.ErrNotFound {
+			cred, err = st.GetCredential(ctx, userID, "oauth")
+		}
 		if err != nil {
 			return nil, err
 		}

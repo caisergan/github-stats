@@ -17,7 +17,10 @@ import (
 	gosync "github-stats/internal/sync"
 )
 
-func testServer(t *testing.T) (*Server, *store.Store) {
+// testServerWithGitHub builds a test Server whose config points the GitHub REST
+// API base at ghBaseURL, so handlers that validate against GitHub (e.g. the PAT
+// settings handler) can be pointed at a fake httptest server.
+func testServerWithGitHub(t *testing.T, ghBaseURL string) (*Server, *store.Store) {
 	t.Helper()
 	st, err := store.Open(t.TempDir() + "/t.db")
 	if err != nil {
@@ -25,7 +28,11 @@ func testServer(t *testing.T) (*Server, *store.Store) {
 	}
 	t.Cleanup(func() { st.Close() })
 	cph, _ := crypto.NewCipher(make([]byte, 32))
-	cfg := config.Config{SessionTTL: time.Hour, BaseURL: "http://localhost:8080"}
+	cfg := config.Config{
+		SessionTTL:       time.Hour,
+		BaseURL:          "http://localhost:8080",
+		GitHubAPIBaseURL: ghBaseURL,
+	}
 	svc := auth.NewService(cfg, st, &auth.OAuthClient{}, cph)
 	eng := gosync.NewEngine(st, func(repoID int64) (*githubapi.Client, error) {
 		return githubapi.NewClient(githubapi.Options{
@@ -37,6 +44,10 @@ func testServer(t *testing.T) (*Server, *store.Store) {
 		}), nil
 	}, gosync.Config{})
 	return NewServer(cfg, st, svc, eng, cph), st
+}
+
+func testServer(t *testing.T) (*Server, *store.Store) {
+	return testServerWithGitHub(t, "http://unused")
 }
 
 func TestMeUnauthorized(t *testing.T) {

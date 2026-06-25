@@ -67,6 +67,9 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 			pr.Delete("/collections/{id}/repos/{repoId}", s.removeCollectionRepo)
 			pr.Get("/collections/{id}/export", s.exportCollection)
 			pr.Post("/import", s.importManifest)
+			pr.Get("/settings/pat", s.getPATStatus)
+			pr.Put("/settings/pat", s.savePAT)
+			pr.Delete("/settings/pat", s.deletePAT)
 		})
 	})
 

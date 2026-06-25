@@ -34,6 +34,7 @@ type Engine struct {
 	newClient ClientFactory
 	cfg       Config
 	bc        *Broadcaster
+	budget    *githubapi.Budget // shared rate-limit budget injected into every worker's client
 
 	cancel context.CancelFunc
 	wg     stdsync.WaitGroup
@@ -65,12 +66,17 @@ func NewEngine(st *store.Store, factory ClientFactory, cfg Config) *Engine {
 	if cfg.JobRetention <= 0 {
 		cfg.JobRetention = 7 * 24 * time.Hour
 	}
-	return &Engine{store: st, newClient: factory, cfg: cfg, bc: NewBroadcaster()}
+	return &Engine{store: st, newClient: factory, cfg: cfg, bc: NewBroadcaster(), budget: githubapi.NewBudget()}
 }
 
 // Broadcaster exposes the engine's progress broadcaster (the SSE handler
 // subscribes to it).
 func (e *Engine) Broadcaster() *Broadcaster { return e.bc }
+
+// Budget returns the engine's shared rate-limit budget (REST + GraphQL). Every
+// client minted for a worker shares this single Budget (see processNextJob), so
+// the snapshot reflects real usage across all sync jobs. Safe for concurrent use.
+func (e *Engine) Budget() *githubapi.Budget { return e.budget }
 
 // TriggerBackfill enqueues a backfill job for repoID, runnable now.
 func (e *Engine) TriggerBackfill(ctx context.Context, repoID int64) (int64, error) {
@@ -102,6 +108,13 @@ func (e *Engine) processNextJob(ctx context.Context) (bool, error) {
 		e.bc.publish(job.RepoID, Event{RepoID: job.RepoID, Phase: "error", Message: err.Error(), Done: true})
 		_ = e.store.FailJob(ctx, job.ID, "client: "+err.Error(), now, e.cfg.FailBackoff, e.cfg.MaxAttempts)
 		return true, nil
+	}
+	// Share the engine's single Budget across every worker's client so the
+	// rate-limit snapshot (GET /api/rate-limit) reflects real usage. The factory
+	// allocates a fresh per-client Budget; we replace it with the shared one
+	// before the client issues any request. Budget is concurrency-safe.
+	if e.budget != nil && client.Budget != e.budget {
+		client.Budget = e.budget
 	}
 
 	e.bc.publish(job.RepoID, Event{RepoID: job.RepoID, Phase: job.Kind, Message: "started"})

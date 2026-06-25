@@ -70,6 +70,7 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 			pr.Get("/settings/pat", s.getPATStatus)
 			pr.Put("/settings/pat", s.savePAT)
 			pr.Delete("/settings/pat", s.deletePAT)
+			pr.Get("/rate-limit", s.rateLimit)
 		})
 	})
 

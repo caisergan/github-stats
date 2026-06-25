@@ -123,6 +123,39 @@ func TestCallbackRejectsStateMismatch(t *testing.T) {
 	}
 }
 
+func TestCallbackRecordsGrantedScope(t *testing.T) {
+	svc := testService(t)
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/access_token"):
+			w.Write([]byte(`{"access_token":"gho_tok","scope":"read:user"}`)) // user declined repo
+		case strings.HasSuffix(r.URL.Path, "/user"):
+			w.Write([]byte(`{"id":1,"login":"neo","avatar_url":""}`))
+		}
+	}))
+	defer gh.Close()
+	svc.Cfg.GitHubScopes = "read:user repo"
+	svc.OAuth = &OAuthClient{ClientID: "c", ClientSecret: "s", RedirectURL: "http://app/cb",
+		OAuthBaseURL: gh.URL, APIBaseURL: gh.URL, HTTP: gh.Client()}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=c&state=abc", nil)
+	req.AddCookie(&http.Cookie{Name: stateCookie, Value: "abc"})
+	rec := httptest.NewRecorder()
+	svc.Callback(rec, req)
+
+	cred, err := svc.Store.GetCredential(req.Context(), 1, "oauth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cred.Scopes != "read:user" {
+		t.Fatalf("recorded scope = %q, want read:user", cred.Scopes)
+	}
+	if MissingScopes(svc.Cfg.GitHubScopes, cred.Scopes) == nil {
+		t.Fatal("expected a recorded scope shortfall (missing repo)")
+	}
+}
+
 func TestLogoutRequiresPOSTAndCSRF(t *testing.T) {
 	svc := testService(t)
 	ctx := context.Background()

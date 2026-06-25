@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"log"
 	"net/http"
 	"strings"
 
@@ -72,6 +73,14 @@ func (s *Service) Callback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "fetch user failed", http.StatusBadGateway)
 		return
+	}
+
+	// Verify the granted scope against what we requested. A shortfall (e.g. the
+	// user declined `repo`) is informational, not fatal — private tracking still
+	// works for public repos; we just log a warning so it can be diagnosed.
+	if missing := MissingScopes(s.Cfg.GitHubScopes, scope); missing != nil {
+		log.Printf("oauth: user %s granted scope %q, missing %v (private repos may be inaccessible)",
+			ghUser.Login, scope, missing)
 	}
 
 	uid, err := s.Store.UpsertUser(r.Context(), &store.User{

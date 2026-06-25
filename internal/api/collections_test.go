@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,5 +137,56 @@ func TestCollectionForbiddenForOtherUser(t *testing.T) {
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("foreign patch status = %d, want 404", rec.Code)
+	}
+}
+
+func TestCollectionExport(t *testing.T) {
+	srv, st := testServer(t)
+	uid, sid := loginSession(t, st, "neo", 7)
+	cid, _ := st.CreateCollection(context.Background(), uid, "Backend")
+	rid := authedRepo(t, st, uid, "octo/svc", 10)
+	if err := st.AddRepoToCollection(context.Background(), uid, cid, rid); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/collections/"+itoa(cid)+"/export", nil)
+	req.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export status = %d, want 200", rec.Code)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, "attachment") {
+		t.Fatalf("Content-Disposition = %q, want attachment", cd)
+	}
+	var body struct {
+		Name  string   `json:"name"`
+		Repos []string `json:"repos"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Name != "Backend" || len(body.Repos) != 1 || body.Repos[0] != "octo/svc" {
+		t.Fatalf("export body = %+v", body)
+	}
+}
+
+func TestImportManifestParse(t *testing.T) {
+	srv, st := testServer(t)
+	_, sid := loginSession(t, st, "neo", 7)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/import?kind=package_json",
+		bytes.NewReader([]byte(`{"dependencies":{"@acme/x":"1.0.0","react":"18"}}`)))
+	req.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("import status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var res ImportResult
+	json.Unmarshal(rec.Body.Bytes(), &res)
+	if len(res.Resolved) != 1 || res.Resolved[0] != "acme/x" {
+		t.Fatalf("resolved = %v", res.Resolved)
+	}
+	if len(res.Unresolved) != 1 || res.Unresolved[0] != "react" {
+		t.Fatalf("unresolved = %v", res.Unresolved)
 	}
 }

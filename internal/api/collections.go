@@ -2,8 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -170,4 +173,113 @@ func (s *Server) mutateCollectionRepo(w http.ResponseWriter, r *http.Request, ad
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// exportCollection handles GET /api/collections/{id}/export — a downloadable JSON file.
+func (s *Server) exportCollection(w http.ResponseWriter, r *http.Request) {
+	u, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	cid, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	cols, err := s.store.ListCollections(r.Context(), u.ID)
+	if err != nil {
+		http.Error(w, "lookup failed", http.StatusInternalServerError)
+		return
+	}
+	var name string
+	found := false
+	for _, c := range cols {
+		if c.ID == cid {
+			name, found = c.Name, true
+			break
+		}
+	}
+	if !found {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	repos, err := s.store.ListCollectionRepos(r.Context(), u.ID, cid)
+	if err != nil {
+		http.Error(w, "lookup failed", http.StatusInternalServerError)
+		return
+	}
+	names := make([]string, 0, len(repos))
+	for _, rp := range repos {
+		names = append(names, rp.FullName)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="`+sanitizeFilename(name)+`.collection.json"`)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"name":  name,
+		"repos": names,
+	})
+}
+
+// importManifest handles POST /api/import?kind=package_json|requirements_txt|collection.
+// It parses the uploaded body and returns candidate repos for the user to confirm.
+func (s *Server) importManifest(w http.ResponseWriter, r *http.Request) {
+	if _, ok := auth.UserFromContext(r.Context()); !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB cap
+	if err != nil {
+		http.Error(w, "read failed", http.StatusBadRequest)
+		return
+	}
+	switch r.URL.Query().Get("kind") {
+	case "package_json":
+		writeJSON(w, http.StatusOK, ParsePackageJSON(data))
+	case "requirements_txt":
+		writeJSON(w, http.StatusOK, ParseRequirementsTxt(data))
+	case "collection":
+		var c struct {
+			Name  string   `json:"name"`
+			Repos []string `json:"repos"`
+		}
+		if err := json.Unmarshal(data, &c); err != nil {
+			http.Error(w, "invalid collection json", http.StatusBadRequest)
+			return
+		}
+		// A collection file is already owner/repo strings: everything is "resolved".
+		writeJSON(w, http.StatusOK, ImportResult{Resolved: dedupeSort(c.Repos), Unresolved: []string{}})
+	default:
+		http.Error(w, "unknown kind", http.StatusBadRequest)
+	}
+}
+
+// sanitizeFilename keeps only safe characters for a download filename.
+func sanitizeFilename(name string) string {
+	var b strings.Builder
+	for _, ch := range name {
+		switch {
+		case ch >= 'a' && ch <= 'z', ch >= 'A' && ch <= 'Z', ch >= '0' && ch <= '9', ch == '-', ch == '_':
+			b.WriteRune(ch)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	if b.Len() == 0 {
+		return "collection"
+	}
+	return b.String()
+}
+
+func dedupeSort(in []string) []string {
+	seen := map[string]struct{}{}
+	for _, s := range in {
+		if s != "" {
+			seen[s] = struct{}{}
+		}
+	}
+	out := keys(seen)
+	sort.Strings(out)
+	return out
 }

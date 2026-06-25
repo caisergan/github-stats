@@ -142,6 +142,16 @@ export async function refreshRepo(id: number): Promise<void> {
   if (!res.ok && res.status !== 202) throw await asError(res, `/api/repos/${id}/refresh`);
 }
 
+export async function loadAllCommits(id: number): Promise<void> {
+  const res = await fetch(`/api/repos/${id}/load-all-commits`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: await csrfHeaders(),
+  });
+  if (!res.ok && res.status !== 202)
+    throw await asError(res, `/api/repos/${id}/load-all-commits`);
+}
+
 // ---------------------------------------------------------------------------
 // Metrics / overview / latest (M4)
 // ---------------------------------------------------------------------------
@@ -259,6 +269,25 @@ export interface LatestIssue {
 export type LatestKind = "commits" | "prs" | "issues";
 export type LatestItem = LatestCommit | LatestPR | LatestIssue;
 
+/** A page of commits plus stored/total counts for the commits tab. */
+export interface CommitsPage {
+  items: LatestCommit[];
+  stored: number; // commits held locally
+  total: number; // GitHub's true total (falls back to `stored` until first sync)
+  limit: number;
+  offset: number;
+}
+
+/** A repo's current/last sync job (for "loading…" / "waiting for quota"). */
+export interface SyncJobStatus {
+  kind: string;
+  status: "" | "pending" | "running" | "done" | "error";
+  next_run_at: string | null;
+  attempts: number;
+  last_error: string;
+  active: boolean; // pending or running
+}
+
 // --- URL builders (pure; unit-tested) -------------------------------------
 
 export function metricsURL(repoID: number, o: MetricsOpts): string {
@@ -280,6 +309,10 @@ export function latestURL(repoID: number, kind: LatestKind, limit: number): stri
   return `/api/repos/${repoID}/latest/${kind}?limit=${limit}`;
 }
 
+export function commitsURL(repoID: number, limit: number, offset: number): string {
+  return `/api/repos/${repoID}/commits?limit=${limit}&offset=${offset}`;
+}
+
 // --- fetch wrappers --------------------------------------------------------
 
 export function fetchMetrics(repoID: number, o: MetricsOpts): Promise<MetricsMap> {
@@ -294,13 +327,21 @@ export function fetchLatest(repoID: number, kind: LatestKind, limit = 20): Promi
   return getJSON<LatestItem[]>(latestURL(repoID, kind, limit));
 }
 
+export function fetchCommits(repoID: number, limit = 30, offset = 0): Promise<CommitsPage> {
+  return getJSON<CommitsPage>(commitsURL(repoID, limit, offset));
+}
+
+export function fetchSyncStatus(repoID: number): Promise<SyncJobStatus> {
+  return getJSON<SyncJobStatus>(`/api/repos/${repoID}/sync/status`);
+}
+
 // ---------------------------------------------------------------------------
 // Sync SSE stream (M3)
 // ---------------------------------------------------------------------------
 
 export interface SyncEvent {
   repo_id: number;
-  phase: string; // "backfill" | "delta" | "commits" | "prs" | "issues" | "releases" | "done" | "error"
+  phase: string; // "backfill" | "delta" | "commits" | "prs" | "issues" | "releases" | "throttled" | "done" | "error"
   message: string;
   done: boolean;
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // graphqlRequest is the POST payload shape.
@@ -50,6 +51,16 @@ func (c *Client) graphql(ctx context.Context, query string, vars map[string]any,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// A 403/429 is GitHub's *secondary* (abuse) rate limit — distinct from the
+		// primary points budget handled above. Surface it as a typed
+		// RateLimitError honouring Retry-After so the engine reschedules the job at
+		// the backoff instead of counting a hard failure. This lets a large-repo
+		// sync that GitHub throttled mid-pagination resume and fully catch up on
+		// its own, rather than aborting with commits left unfetched. Mirrors the
+		// REST path's RateLimitError handling (client.go).
+		if backoff := c.Budget.BackoffFor(resp.StatusCode, resp.Header, time.Now()); backoff > 0 {
+			return &RateLimitError{Resource: "graphql", Reset: time.Now().Add(backoff)}
+		}
 		return fmt.Errorf("graphql: status %d", resp.StatusCode)
 	}
 

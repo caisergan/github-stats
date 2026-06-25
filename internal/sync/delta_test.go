@@ -95,8 +95,29 @@ func TestRunDeltaIngestsAndRecomputes(t *testing.T) {
 	}
 
 	now := ptime("2026-05-21T00:00:00Z")
-	if err := RunDelta(ctx, st, client, repoID, func() time.Time { return now }); err != nil {
+	var progress []string
+	emit := func(phase, detail string) { progress = append(progress, phase+": "+detail) }
+	if err := RunDelta(ctx, st, client, repoID, func() time.Time { return now }, emit); err != nil {
 		t.Fatalf("RunDelta: %v", err)
+	}
+
+	// Per-page progress was surfaced for each phase that ingested rows.
+	wantProgress := []string{
+		"commits: 1 new commits fetched",
+		"prs: 1 updated pull requests",
+		"issues: 1 updated issues",
+	}
+	for _, want := range wantProgress {
+		found := false
+		for _, got := range progress {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing progress event %q; got %v", want, progress)
+		}
 	}
 
 	// Events ingested.
@@ -188,7 +209,7 @@ func TestRunDeltaStopsAtOverlapCutoff(t *testing.T) {
 	st.UpsertSyncState(ctx, &store.SyncState{RepoID: repoID, LastCommitAt: &last, Status: "complete"})
 
 	now := ptime("2026-05-21T00:00:00Z")
-	if err := RunDelta(ctx, st, client, repoID, func() time.Time { return now }); err != nil {
+	if err := RunDelta(ctx, st, client, repoID, func() time.Time { return now }, nil); err != nil {
 		t.Fatal(err)
 	}
 

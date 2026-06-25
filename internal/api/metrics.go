@@ -247,6 +247,73 @@ func parseLimit(raw string) int {
 	return n
 }
 
+// parseOffset reads ?offset= (default 0, min 0).
+func parseOffset(raw string) int {
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// commitsPageJSON is the paginated commits-tab payload: a page of rows plus the
+// count stored locally and GitHub's true total (for the "X of Y most recent"
+// header and the tab badge).
+type commitsPageJSON struct {
+	Items  []commitJSON `json:"items"`
+	Stored int64        `json:"stored"`
+	Total  int64        `json:"total"`
+	Limit  int          `json:"limit"`
+	Offset int          `json:"offset"`
+}
+
+// repoCommits handles GET /api/repos/{id}/commits?limit=&offset=: a page of the
+// newest commits plus stored/total counts.
+func (s *Server) repoCommits(w http.ResponseWriter, r *http.Request) {
+	_, repoID, ok := s.requireTracked(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	limit := parseLimit(r.URL.Query().Get("limit"))
+	offset := parseOffset(r.URL.Query().Get("offset"))
+
+	repo, err := s.store.GetRepo(ctx, repoID)
+	if err != nil {
+		http.Error(w, "repo lookup failed", http.StatusInternalServerError)
+		return
+	}
+	stored, err := s.store.CountCommits(ctx, repoID)
+	if err != nil {
+		http.Error(w, "count failed", http.StatusInternalServerError)
+		return
+	}
+	rows, err := s.store.LatestCommitsPaged(ctx, repoID, limit, offset)
+	if err != nil {
+		http.Error(w, "load failed", http.StatusInternalServerError)
+		return
+	}
+	items := make([]commitJSON, 0, len(rows))
+	for _, c := range rows {
+		items = append(items, commitJSON{
+			SHA: c.SHA, AuthorLogin: c.AuthorLogin, CommittedAt: fmtTime(c.CommittedAt),
+			Additions: c.Additions, Deletions: c.Deletions, IsBot: c.IsBot, MsgFirstLine: c.MsgFirstLine,
+		})
+	}
+	// GitHub's true total; fall back to the stored count until a sync has
+	// populated commit_count (or if a stale total trails what we actually hold).
+	total := repo.CommitCount
+	if total < stored {
+		total = stored
+	}
+	writeJSON(w, http.StatusOK, commitsPageJSON{
+		Items: items, Stored: stored, Total: total, Limit: limit, Offset: offset,
+	})
+}
+
 // repoLatest handles GET /api/repos/{id}/latest/{commits|prs|issues}?limit=.
 func (s *Server) repoLatest(w http.ResponseWriter, r *http.Request) {
 	_, repoID, ok := s.requireTracked(w, r)

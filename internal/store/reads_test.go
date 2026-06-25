@@ -206,6 +206,37 @@ func TestLatestCommitsPRsIssues(t *testing.T) {
 	}
 }
 
+func TestCommitsCountAndPagination(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	repoID := seedReadFixture(t, s)
+
+	n, err := s.CountCommits(ctx, repoID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 4 {
+		t.Fatalf("CountCommits = %d, want 4", n)
+	}
+
+	// Page 1 (offset 0, limit 2): newest two — c4, c3.
+	p1, err := s.LatestCommitsPaged(ctx, repoID, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p1) != 2 || p1[0].SHA != "c4" || p1[1].SHA != "c3" {
+		t.Fatalf("page1 = %+v, want [c4 c3]", p1)
+	}
+	// Page 2 (offset 2): the older commits, no overlap with page 1.
+	p2, err := s.LatestCommitsPaged(ctx, repoID, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p2) != 2 || p2[0].SHA == "c4" || p2[0].SHA == "c3" {
+		t.Fatalf("page2 = %+v (must not overlap page1)", p2)
+	}
+}
+
 func TestEarliestEventDate(t *testing.T) {
 	s := openTemp(t)
 	ctx := context.Background()

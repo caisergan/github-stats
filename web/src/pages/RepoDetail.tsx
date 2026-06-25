@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { I } from "../components/Icons";
 import { SyncStatusBadge } from "../components/UI";
 import { WindowControls, Kpi, MetricCard } from "../components/Components";
@@ -11,9 +11,11 @@ import {
   Leaderboard,
 } from "../components/Charts";
 import LatestList from "../components/LatestList";
+import LoadAllCommits from "../components/LoadAllCommits";
 import RefreshButton from "../components/RefreshButton";
+import UntrackButton from "../components/UntrackButton";
 import { useAsync } from "../hooks/useAsync";
-import { fetchMetrics, fetchOverview, fetchLatest } from "../api";
+import { fetchMetrics, fetchOverview, fetchLatest, fetchCommits } from "../api";
 import type {
   Repo,
   MetricsMap,
@@ -23,10 +25,21 @@ import type {
   BucketRow,
   LeaderRow,
   LatestItem,
+  LatestCommit,
   WindowSpec,
 } from "../api";
 import { seriesToHeatmap } from "../aggregate";
 import * as F from "../format";
+
+// Trailing-period phrase for the contribution heatmap, derived from the selected
+// window. ("all" caps at a year because the calendar grid only spans 53 weeks.)
+const WINDOW_PHRASE: Record<WindowSpec, string> = {
+  "30d": "in the last 30 days",
+  "90d": "in the last 90 days",
+  "6m": "in the last 6 months",
+  "1y": "in the last year",
+  all: "in the last year",
+};
 
 const METRIC_KEYS = [
   "commit_rate",
@@ -67,9 +80,10 @@ const TABS = [
 interface RepoDetailProps {
   repo: Repo;
   onBack: () => void;
+  onUntrack: (id: number) => Promise<void>;
 }
 
-export default function RepoDetail({ repo, onBack }: RepoDetailProps) {
+export default function RepoDetail({ repo, onBack, onUntrack }: RepoDetailProps) {
   const [tab, setTab] = useState("insights");
   const [win, setWin] = useState<WindowSpec>("90d");
   const [excludeBots, setExcludeBots] = useState(false);
@@ -85,18 +99,44 @@ export default function RepoDetail({ repo, onBack }: RepoDetailProps) {
     [repo.id, win, excludeBots],
   );
   const heat = useAsync<number[][]>(async () => {
-    const m = await fetchMetrics(repo.id, { window: "all", excludeBots, keys: ["commit_rate"] });
+    const m = await fetchMetrics(repo.id, { window: win, excludeBots, keys: ["commit_rate"] });
     return seriesToHeatmap(tsSeries(m.commit_rate));
-  }, [repo.id, excludeBots]);
-  const commits = useAsync<LatestItem[]>(() => fetchLatest(repo.id, "commits", 20), [repo.id]);
+  }, [repo.id, excludeBots, win]);
   const prs = useAsync<LatestItem[]>(() => fetchLatest(repo.id, "prs", 20), [repo.id]);
   const issues = useAsync<LatestItem[]>(() => fetchLatest(repo.id, "issues", 20), [repo.id]);
+
+  // Commits use offset pagination (not useAsync) so "Load more" can append pages
+  // while the badge/header show GitHub's true total.
+  const COMMIT_PAGE = 30;
+  const [commitItems, setCommitItems] = useState<LatestCommit[]>([]);
+  const [commitStored, setCommitStored] = useState(0);
+  const [commitTotal, setCommitTotal] = useState(0);
+  const [commitLoading, setCommitLoading] = useState(false);
+
+  const loadCommitPage = useCallback(
+    async (offset: number) => {
+      setCommitLoading(true);
+      try {
+        const page = await fetchCommits(repo.id, COMMIT_PAGE, offset);
+        setCommitStored(page.stored);
+        setCommitTotal(page.total);
+        setCommitItems((prev) => (offset === 0 ? page.items : [...prev, ...page.items]));
+      } finally {
+        setCommitLoading(false);
+      }
+    },
+    [repo.id],
+  );
+
+  useEffect(() => {
+    loadCommitPage(0);
+  }, [loadCommitPage]);
 
   const reloadAll = () => {
     ov.reload();
     metrics.reload();
     heat.reload();
-    commits.reload();
+    loadCommitPage(0);
     prs.reload();
     issues.reload();
   };
@@ -111,7 +151,7 @@ export default function RepoDetail({ repo, onBack }: RepoDetailProps) {
           <I.chevLeft style={{ width: 14, height: 14 }} />
         </a>
         <a onClick={onBack}>Repositories</a>
-        <I.chevRight style={{ width: 12, height: 12, color: "var(--faint)" }} />
+        <span className="sep" style={{ color: "var(--faint)" }}>–</span>
         <span style={{ color: "var(--fg-2)" }}>
           {owner}/{name}
         </span>
@@ -175,6 +215,12 @@ export default function RepoDetail({ repo, onBack }: RepoDetailProps) {
         <div className="actions">
           <SyncStatusBadge status={repo.sync_status} />
           <RefreshButton repoID={repo.id} onComplete={reloadAll} />
+          <UntrackButton
+            repoID={repo.id}
+            repoName={repo.full_name}
+            onUntrack={onUntrack}
+            onDone={onBack}
+          />
         </div>
       </div>
 
@@ -209,9 +255,11 @@ export default function RepoDetail({ repo, onBack }: RepoDetailProps) {
           <div className="tabs">
             {TABS.map((t) => {
               const count: Record<string, number> = {
-                commits: commits.data?.length ?? 0,
+                commits: commitTotal,
                 issues: overview.open_issues,
                 prs: overview.open_prs,
+                contributors: overview.contributors,
+                releases: overview.releases,
               };
               return (
                 <button
@@ -227,10 +275,28 @@ export default function RepoDetail({ repo, onBack }: RepoDetailProps) {
             })}
           </div>
 
-          {tab === "insights" && <InsightsTab m={m} heat={heat.data ?? []} />}
-          {tab === "commits" && <CommitsTab m={m} commits={commits.data ?? []} />}
-          {tab === "issues" && <IssuesTab m={m} issues={issues.data ?? []} />}
-          {tab === "prs" && <PrsTab m={m} prs={prs.data ?? []} />}
+          {tab === "insights" && (
+            <InsightsTab m={m} heat={heat.data ?? []} heatLabel={WINDOW_PHRASE[win]} />
+          )}
+          {tab === "commits" && (
+            <CommitsTab
+              m={m}
+              repoID={repo.id}
+              repoFullName={repo.full_name}
+              items={commitItems}
+              stored={commitStored}
+              total={commitTotal}
+              loading={commitLoading}
+              onLoadMore={() => loadCommitPage(commitItems.length)}
+              onReload={() => loadCommitPage(0)}
+            />
+          )}
+          {tab === "issues" && (
+            <IssuesTab m={m} issues={issues.data ?? []} repoFullName={repo.full_name} />
+          )}
+          {tab === "prs" && (
+            <PrsTab m={m} prs={prs.data ?? []} repoFullName={repo.full_name} />
+          )}
           {tab === "contributors" && <ContributorsTab m={m} />}
           {tab === "releases" && <ReleasesTab ov={overview} />}
         </>
@@ -240,19 +306,23 @@ export default function RepoDetail({ repo, onBack }: RepoDetailProps) {
 }
 
 /* ---- tabs ---- */
-function InsightsTab({ m, heat }: { m: MetricsMap; heat: number[][] }) {
+function InsightsTab({
+  m,
+  heat,
+  heatLabel,
+}: {
+  m: MetricsMap;
+  heat: number[][];
+  heatLabel: string;
+}) {
   return (
     <div
       className="fade-in"
       style={{ display: "flex", flexDirection: "column", gap: "var(--gap)" }}
     >
-      <MetricCard
-        title="Contribution activity"
-        sub="Daily commits across the last year"
-        span
-      >
+      <MetricCard title="Contribution activity" sub={`Daily commits ${heatLabel}`} span>
         <div style={{ marginTop: 10 }}>
-          <ContributionHeatmap weeks={heat} />
+          <ContributionHeatmap weeks={heat} label={heatLabel} />
         </div>
       </MetricCard>
       <div className="metric-grid two">
@@ -295,7 +365,28 @@ function InsightsTab({ m, heat }: { m: MetricsMap; heat: number[][] }) {
   );
 }
 
-function CommitsTab({ m, commits }: { m: MetricsMap; commits: LatestItem[] }) {
+function CommitsTab({
+  m,
+  repoID,
+  repoFullName,
+  items,
+  stored,
+  total,
+  loading,
+  onLoadMore,
+  onReload,
+}: {
+  m: MetricsMap;
+  repoID: number;
+  repoFullName: string;
+  items: LatestCommit[];
+  stored: number;
+  total: number;
+  loading: boolean;
+  onLoadMore: () => void;
+  onReload: () => void;
+}) {
+  const canLoadMore = items.length < stored;
   return (
     <div
       className="fade-in"
@@ -310,14 +401,36 @@ function CommitsTab({ m, commits }: { m: MetricsMap; commits: LatestItem[] }) {
           <BarSeries series={tsSeries(m.commit_rate)} unit="commits" height={220} />
         </div>
       </MetricCard>
-      <MetricCard title="Latest commits" sub={`${commits.length} most recent`}>
-        <LatestList kind="commits" items={commits} />
+      <MetricCard title="Latest commits" sub={`${stored} of ${total} most recent`}>
+        <LatestList kind="commits" items={items} repoFullName={repoFullName} />
+        <div className="commits-foot">
+          <div className="lm">
+            {canLoadMore && (
+              <button className="btn ghost sm" onClick={onLoadMore} disabled={loading}>
+                {loading ? "Loading…" : "Load more"}
+              </button>
+            )}
+            <span className="muted-note">
+              Showing {items.length} of {stored} loaded
+              {total > stored ? ` · ${total - stored} more on GitHub` : ""}
+            </span>
+          </div>
+          <LoadAllCommits repoID={repoID} onComplete={onReload} />
+        </div>
       </MetricCard>
     </div>
   );
 }
 
-function IssuesTab({ m, issues }: { m: MetricsMap; issues: LatestItem[] }) {
+function IssuesTab({
+  m,
+  issues,
+  repoFullName,
+}: {
+  m: MetricsMap;
+  issues: LatestItem[];
+  repoFullName: string;
+}) {
   const bks = buckets(m.open_issue_age);
   const openTotal = bks.reduce((a, b) => a + b.count, 0);
   const stale = bks
@@ -347,13 +460,21 @@ function IssuesTab({ m, issues }: { m: MetricsMap; issues: LatestItem[] }) {
         <BucketsBar result={{ buckets: bks }} />
       </MetricCard>
       <MetricCard title="Latest issues" sub={`${issues.length} most recent`}>
-        <LatestList kind="issues" items={issues} />
+        <LatestList kind="issues" items={issues} repoFullName={repoFullName} />
       </MetricCard>
     </div>
   );
 }
 
-function PrsTab({ m, prs }: { m: MetricsMap; prs: LatestItem[] }) {
+function PrsTab({
+  m,
+  prs,
+  repoFullName,
+}: {
+  m: MetricsMap;
+  prs: LatestItem[];
+  repoFullName: string;
+}) {
   const merged = Math.round(tsSeries(m.pr_throughput).reduce((a, p) => a + p.value, 0));
   const ttm = scalar(m.time_to_merge);
   return (
@@ -378,7 +499,7 @@ function PrsTab({ m, prs }: { m: MetricsMap; prs: LatestItem[] }) {
         </MetricCard>
       </div>
       <MetricCard title="Latest pull requests" sub={`${prs.length} most recent`}>
-        <LatestList kind="prs" items={prs} />
+        <LatestList kind="prs" items={prs} repoFullName={repoFullName} />
       </MetricCard>
     </div>
   );

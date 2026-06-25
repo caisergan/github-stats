@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -22,7 +23,12 @@ const freshLookback = 14 * 24 * time.Hour
 // recorded commit time, and PRs/issues updated since that time minus an overlap
 // window. It upserts events, recomputes daily aggregates for the touched span,
 // and advances sync_state. `now` is injected for deterministic tests.
-func RunDelta(ctx context.Context, st *store.Store, client *githubapi.Client, repoID int64, now func() time.Time) error {
+// emit, if non-nil, receives per-page progress (phase, human detail) so callers
+// can surface live "fetched N commits…" progress for large repos. May be nil.
+func RunDelta(ctx context.Context, st *store.Store, client *githubapi.Client, repoID int64, now func() time.Time, emit func(phase, detail string)) error {
+	if emit == nil {
+		emit = func(string, string) {}
+	}
 	repo, err := st.GetRepo(ctx, repoID)
 	if err != nil {
 		return err
@@ -70,6 +76,7 @@ func RunDelta(ctx context.Context, st *store.Store, client *githubapi.Client, re
 
 	// --- Commits since ---
 	after := ""
+	commitTotal := 0
 	for {
 		page, err := client.FetchCommitsSince(ctx, owner, name, repo.DefaultBranch, since, after)
 		if err != nil {
@@ -84,6 +91,8 @@ func RunDelta(ctx context.Context, st *store.Store, client *githubapi.Client, re
 				newest = c.CommittedAt
 			}
 		}
+		commitTotal += len(page.Commits)
+		emit("commits", fmt.Sprintf("%d new commits fetched", commitTotal))
 		if !page.HasNextPage {
 			break
 		}
@@ -92,6 +101,7 @@ func RunDelta(ctx context.Context, st *store.Store, client *githubapi.Client, re
 
 	// --- Pull requests updated (stop at cutoff) ---
 	after = ""
+	prTotal := 0
 prLoop:
 	for {
 		page, err := client.FetchPullRequestsUpdated(ctx, owner, name, after)
@@ -106,6 +116,8 @@ prLoop:
 						return err
 					}
 					addPRSpan(span, batch)
+					prTotal += len(batch)
+					emit("prs", fmt.Sprintf("%d updated pull requests", prTotal))
 				}
 				break prLoop
 			}
@@ -115,6 +127,8 @@ prLoop:
 			return err
 		}
 		addPRSpan(span, batch)
+		prTotal += len(batch)
+		emit("prs", fmt.Sprintf("%d updated pull requests", prTotal))
 		if !page.HasNextPage {
 			break
 		}
@@ -123,6 +137,7 @@ prLoop:
 
 	// --- Issues updated (stop at cutoff) ---
 	after = ""
+	issueTotal := 0
 issueLoop:
 	for {
 		page, err := client.FetchIssuesUpdated(ctx, owner, name, after)
@@ -137,6 +152,8 @@ issueLoop:
 						return err
 					}
 					addIssueSpan(span, batch)
+					issueTotal += len(batch)
+					emit("issues", fmt.Sprintf("%d updated issues", issueTotal))
 				}
 				break issueLoop
 			}
@@ -146,6 +163,8 @@ issueLoop:
 			return err
 		}
 		addIssueSpan(span, batch)
+		issueTotal += len(batch)
+		emit("issues", fmt.Sprintf("%d updated issues", issueTotal))
 		if !page.HasNextPage {
 			break
 		}

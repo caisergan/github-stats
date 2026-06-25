@@ -54,14 +54,15 @@ func (s *Server) savePAT(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid token: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	// A classic token reports its scopes; reject one that can't read private repos
-	// so the user finds out here instead of via a cryptic GraphQL error on track.
-	// Fine-grained tokens report no scopes (info.Scopes == ""); we can't judge them
-	// at save time, so we let them through.
+	// This PAT is the read-only path to PRIVATE repos (the OAuth login is read-only
+	// and public-only). The safest choice is a fine-grained token with read-only
+	// access — those report no classic scopes (info.Scopes == ""), so we accept
+	// them. A classic token reports its scopes; if it lacks "repo" it can't read
+	// private repos at all, so reject it here rather than fail cryptically on track.
 	if info.Scopes != "" && !githubapi.HasRepoScope(info.Scopes) {
-		http.Error(w, `this token is missing the "repo" scope, which is required to access `+
-			`private repositories. Generate a classic token with the "repo" scope (or a `+
-			`fine-grained token with access to the repositories you want to track).`,
+		http.Error(w, "this token can't read private repositories. Use a fine-grained "+
+			`personal access token with read-only access (Contents: Read) to the repos `+
+			`you want to track, or a classic token with the "repo" scope.`,
 			http.StatusBadRequest)
 		return
 	}

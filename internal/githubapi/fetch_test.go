@@ -35,7 +35,7 @@ func TestFetchRepoMeta(t *testing.T) {
 		"databaseId": `{"data":{"repository":{
 			"databaseId": 123, "nameWithOwner":"octocat/hello", "isPrivate":true,
 			"description":"hi", "stargazerCount":7, "forkCount":2,
-			"defaultBranchRef":{"name":"main"},
+			"defaultBranchRef":{"name":"main","target":{"history":{"totalCount":657}}},
 			"primaryLanguage":{"name":"Go","color":"#00ADD8"},
 			"languages":{"totalSize":100,"edges":[
 				{"size":80,"node":{"name":"Go","color":"#00ADD8"}},
@@ -57,6 +57,9 @@ func TestFetchRepoMeta(t *testing.T) {
 	}
 	if r.PrimaryLanguage != "Go" || r.LanguageColor != "#00ADD8" {
 		t.Fatalf("language = %q/%q, want Go/#00ADD8", r.PrimaryLanguage, r.LanguageColor)
+	}
+	if r.CommitCount != 657 {
+		t.Fatalf("commit count = %d, want 657 (history.totalCount)", r.CommitCount)
 	}
 	if r.Languages != `[{"name":"Go","color":"#00ADD8","size":80},{"name":"HTML","color":"#e34c26","size":20}]` {
 		t.Fatalf("languages breakdown = %s", r.Languages)

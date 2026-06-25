@@ -10,7 +10,7 @@ import stdsync "sync"
 // Event is one progress update for a repo's sync.
 type Event struct {
 	RepoID  int64  `json:"repo_id"`
-	Phase   string `json:"phase"`   // "backfill" | "delta" | "commits" | "prs" | "issues" | "releases" | "done" | "error"
+	Phase   string `json:"phase"`   // "backfill" | "delta" | "commits" | "prs" | "issues" | "releases" | "throttled" | "done" | "error"
 	Message string `json:"message"` // human-readable detail
 	Done    bool   `json:"done"`    // terminal event for this run
 }

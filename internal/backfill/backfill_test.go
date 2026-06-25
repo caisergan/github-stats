@@ -103,7 +103,7 @@ func TestRunBackfillEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Run(ctx, st, client, repoID); err != nil {
+	if err := Run(ctx, st, client, repoID, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -214,7 +214,7 @@ func TestRunResumesFromSavedCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Run(ctx, st, client, repoID); err != nil {
+	if err := Run(ctx, st, client, repoID, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	assertCount(t, st, "SELECT COUNT(*) FROM commits WHERE repo_id=?", repoID, 1)

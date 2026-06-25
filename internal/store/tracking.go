@@ -22,6 +22,15 @@ func (s *Store) UntrackRepo(ctx context.Context, userID, repoID int64) error {
 	return err
 }
 
+// CountTrackers returns how many users currently track the repo. Used to decide
+// whether a repo's data can be hard-deleted (no remaining trackers).
+func (s *Store) CountTrackers(ctx context.Context, repoID int64) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM repo_tracking WHERE repo_id = ?`, repoID).Scan(&n)
+	return n, err
+}
+
 // IsTracked reports whether user tracks repo.
 func (s *Store) IsTracked(ctx context.Context, userID, repoID int64) (bool, error) {
 	var one int
@@ -41,7 +50,7 @@ func (s *Store) IsTracked(ctx context.Context, userID, repoID int64) (bool, erro
 func (s *Store) ListTrackedRepos(ctx context.Context, userID int64) ([]Repo, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT r.id, r.github_id, r.full_name, r.is_private, r.default_branch,
-			r.description, r.stargazers, r.forks, r.primary_language, r.language_color, r.languages, r.created_at
+			r.description, r.stargazers, r.forks, r.primary_language, r.language_color, r.languages, r.commit_count, r.created_at
 		FROM repo_tracking t
 		JOIN repos r ON r.id = t.repo_id
 		WHERE t.user_id = ?
@@ -55,7 +64,7 @@ func (s *Store) ListTrackedRepos(ctx context.Context, userID int64) ([]Repo, err
 		var r Repo
 		var priv int
 		if err := rows.Scan(&r.ID, &r.GitHubID, &r.FullName, &priv, &r.DefaultBranch,
-			&r.Description, &r.Stargazers, &r.Forks, &r.PrimaryLanguage, &r.LanguageColor, &r.Languages, &r.CreatedAt); err != nil {
+			&r.Description, &r.Stargazers, &r.Forks, &r.PrimaryLanguage, &r.LanguageColor, &r.Languages, &r.CommitCount, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		r.IsPrivate = priv != 0

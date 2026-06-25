@@ -146,9 +146,10 @@ function SignIn() {
 interface RepoDetailWrapperProps {
   resolve: (owner: string, repo: string) => Repo | null;
   onBack: () => void;
+  onUntrack: (id: number) => Promise<void>;
 }
 
-function RepoDetailWrapper({ resolve, onBack }: RepoDetailWrapperProps) {
+function RepoDetailWrapper({ resolve, onBack, onUntrack }: RepoDetailWrapperProps) {
   const { owner = "", repo = "" } = useParams();
   const matched = resolve(owner, repo);
 
@@ -164,7 +165,7 @@ function RepoDetailWrapper({ resolve, onBack }: RepoDetailWrapperProps) {
     );
   }
 
-  return <RepoDetail repo={matched} onBack={onBack} />;
+  return <RepoDetail repo={matched} onBack={onBack} onUntrack={onUntrack} />;
 }
 
 export default function App() {
@@ -287,7 +288,11 @@ export default function App() {
         <Route
           path="/:owner/:repo"
           element={
-            <RepoDetailWrapper resolve={reposApi.resolve} onBack={() => navigate("/")} />
+            <RepoDetailWrapper
+              resolve={reposApi.resolve}
+              onBack={() => navigate("/")}
+              onUntrack={reposApi.remove}
+            />
           }
         />
       </Routes>

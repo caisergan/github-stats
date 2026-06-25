@@ -3,11 +3,13 @@ package githubapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestClient(t *testing.T, gqlURL, restURL string) *Client {
@@ -69,6 +71,34 @@ func TestGraphQLDecodesDataAndRateLimit(t *testing.T) {
 	rem, _ := c.Budget.GraphQL()
 	if rem != 4998 {
 		t.Fatalf("budget not updated from rateLimit: remaining=%d", rem)
+	}
+}
+
+// A 403/429 secondary-rate-limit response must surface as a typed RateLimitError
+// (honouring Retry-After) so the sync engine reschedules the job instead of
+// counting a hard failure — this is what lets a throttled large-repo sync resume
+// and fully catch up rather than leaving commits unfetched.
+func TestGraphQLSecondaryRateLimitIsRetryable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "42")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"You have exceeded a secondary rate limit"}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, "http://unused")
+	var data struct{}
+	err := c.graphql(context.Background(), `query{x}`, nil, &data)
+
+	var rlErr *RateLimitError
+	if !errors.As(err, &rlErr) {
+		t.Fatalf("expected *RateLimitError, got %v", err)
+	}
+	if rlErr.Resource != "graphql" {
+		t.Errorf("Resource = %q, want graphql", rlErr.Resource)
+	}
+	if d := time.Until(rlErr.Reset); d < 30*time.Second || d > 45*time.Second {
+		t.Errorf("Reset honoured Retry-After poorly: %v from now", d)
 	}
 }
 

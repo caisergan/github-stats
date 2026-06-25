@@ -209,10 +209,16 @@ func (s *Store) OpenIssuesAsOf(ctx context.Context, repoID int64, asOf time.Time
 
 // LatestCommits returns the newest commits for a repo (newest first).
 func (s *Store) LatestCommits(ctx context.Context, repoID int64, limit int) ([]Commit, error) {
+	return s.LatestCommitsPaged(ctx, repoID, limit, 0)
+}
+
+// LatestCommitsPaged returns a page of the newest commits (newest first),
+// skipping `offset` rows — the backing query for the commits tab's "Load more".
+func (s *Store) LatestCommitsPaged(ctx context.Context, repoID int64, limit, offset int) ([]Commit, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT sha, author_login, committed_at, additions, deletions, is_bot, msg_first_line
 		FROM commits WHERE repo_id = ?
-		ORDER BY committed_at DESC LIMIT ?`, repoID, limit)
+		ORDER BY committed_at DESC LIMIT ? OFFSET ?`, repoID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -228,6 +234,14 @@ func (s *Store) LatestCommits(ctx context.Context, repoID int64, limit int) ([]C
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// CountCommits returns how many commits are stored locally for a repo.
+func (s *Store) CountCommits(ctx context.Context, repoID int64) (int64, error) {
+	var n int64
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM commits WHERE repo_id = ?`, repoID).Scan(&n)
+	return n, err
 }
 
 // LatestPRs returns the newest pull requests for a repo (newest created first).

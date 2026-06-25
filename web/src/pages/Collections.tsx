@@ -244,7 +244,7 @@ export default function Collections({
             <I.chevLeft style={{ width: 14, height: 14 }} />
           </a>
           <a onClick={() => setSelected(null)}>Collections</a>
-          <I.chevRight style={{ width: 12, height: 12, color: "var(--faint)" }} />
+          <span className="sep" style={{ color: "var(--faint)" }}>–</span>
           <span style={{ color: "var(--fg-2)" }}>{selected.name}</span>
         </div>
         <div className="detail-head">

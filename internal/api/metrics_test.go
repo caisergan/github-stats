@@ -244,6 +244,56 @@ func TestRepoLatestCommits(t *testing.T) {
 	}
 }
 
+func TestRepoCommitsPaginatedWithCounts(t *testing.T) {
+	srv, st := testServer(t)
+	repoID := seedMetricsRepo(t, srv, st) // 3 commits c1,c2,c3; commit_count unset (0)
+	ctx := context.Background()
+	base := "/api/repos/" + strconv.FormatInt(repoID, 10) + "/commits"
+
+	// Page 1: newest two (c3, c2); total falls back to stored while commit_count=0.
+	rec := authedGet(t, srv, st, base+"?limit=2&offset=0")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var p struct {
+		Items  []map[string]any `json:"items"`
+		Stored int64            `json:"stored"`
+		Total  int64            `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Items) != 2 || p.Items[0]["sha"] != "c3" {
+		t.Fatalf("page1 items = %v, want [c3 c2]", p.Items)
+	}
+	if p.Stored != 3 || p.Total != 3 {
+		t.Fatalf("stored=%d total=%d, want 3/3 (total falls back to stored)", p.Stored, p.Total)
+	}
+
+	// Page 2: offset 2 → the remaining commit (c1), no overlap with page 1.
+	rec2 := authedGet(t, srv, st, base+"?limit=2&offset=2")
+	var p2 struct {
+		Items []map[string]any `json:"items"`
+	}
+	json.Unmarshal(rec2.Body.Bytes(), &p2)
+	if len(p2.Items) != 1 || p2.Items[0]["sha"] != "c1" {
+		t.Fatalf("page2 items = %v, want [c1]", p2.Items)
+	}
+
+	// Once commit_count is known, total reflects GitHub's true total.
+	if _, err := st.UpsertRepo(ctx, &store.Repo{GitHubID: 10, FullName: "a/b", DefaultBranch: "main", CommitCount: 100}); err != nil {
+		t.Fatal(err)
+	}
+	rec3 := authedGet(t, srv, st, base+"?limit=2")
+	var p3 struct {
+		Total int64 `json:"total"`
+	}
+	json.Unmarshal(rec3.Body.Bytes(), &p3)
+	if p3.Total != 100 {
+		t.Fatalf("total = %d, want 100 (github commit_count)", p3.Total)
+	}
+}
+
 func TestRepoLatestPRsAndIssues(t *testing.T) {
 	srv, st := testServer(t)
 	repoID := seedMetricsRepo(t, srv, st)

@@ -6,6 +6,7 @@ package backfill
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -17,7 +18,14 @@ import (
 // Run performs the full backfill for repoID. It is resumable: cursors are saved
 // to sync_state after every page, so a re-run after interruption continues from
 // the last saved cursor rather than re-fetching from the start.
-func Run(ctx context.Context, st *store.Store, client *githubapi.Client, repoID int64) error {
+//
+// emit, if non-nil, receives a per-page progress update (phase, human detail) so
+// callers can surface live "fetched N commits…" progress for large repos. It may
+// be nil (tests / non-streaming callers).
+func Run(ctx context.Context, st *store.Store, client *githubapi.Client, repoID int64, emit func(phase, detail string)) error {
+	if emit == nil {
+		emit = func(string, string) {}
+	}
 	repo, err := st.GetRepo(ctx, repoID)
 	if err != nil {
 		return err
@@ -49,16 +57,16 @@ func Run(ctx context.Context, st *store.Store, client *githubapi.Client, repoID 
 
 	span := &datespan.Span{}
 
-	if err := backfillCommits(ctx, st, client, repoID, owner, name, branch, ss, span); err != nil {
+	if err := backfillCommits(ctx, st, client, repoID, owner, name, branch, ss, span, emit); err != nil {
 		return err
 	}
-	if err := backfillPRs(ctx, st, client, repoID, owner, name, ss, span); err != nil {
+	if err := backfillPRs(ctx, st, client, repoID, owner, name, ss, span, emit); err != nil {
 		return err
 	}
-	if err := backfillIssues(ctx, st, client, repoID, owner, name, ss, span); err != nil {
+	if err := backfillIssues(ctx, st, client, repoID, owner, name, ss, span, emit); err != nil {
 		return err
 	}
-	if err := backfillReleases(ctx, st, client, repoID, owner, name, ss, span); err != nil {
+	if err := backfillReleases(ctx, st, client, repoID, owner, name, ss, span, emit); err != nil {
 		return err
 	}
 
@@ -77,8 +85,9 @@ func Run(ctx context.Context, st *store.Store, client *githubapi.Client, repoID 
 }
 
 func backfillCommits(ctx context.Context, st *store.Store, client *githubapi.Client,
-	repoID int64, owner, name, branch string, ss *store.SyncState, span *datespan.Span) error {
+	repoID int64, owner, name, branch string, ss *store.SyncState, span *datespan.Span, emit func(phase, detail string)) error {
 	after := ss.LastCommitCursor
+	total := 0
 	for {
 		page, err := client.FetchCommits(ctx, owner, name, branch, after)
 		if err != nil {
@@ -98,6 +107,8 @@ func backfillCommits(ctx context.Context, st *store.Store, client *githubapi.Cli
 		if err := st.UpsertSyncState(ctx, ss); err != nil { // resumable: save cursor each page
 			return err
 		}
+		total += len(page.Commits)
+		emit("commits", fmt.Sprintf("%d commits fetched", total))
 		if !page.HasNextPage {
 			return nil
 		}
@@ -106,8 +117,9 @@ func backfillCommits(ctx context.Context, st *store.Store, client *githubapi.Cli
 }
 
 func backfillPRs(ctx context.Context, st *store.Store, client *githubapi.Client,
-	repoID int64, owner, name string, ss *store.SyncState, span *datespan.Span) error {
+	repoID int64, owner, name string, ss *store.SyncState, span *datespan.Span, emit func(phase, detail string)) error {
 	after := ss.LastPRCursor
+	total := 0
 	for {
 		page, err := client.FetchPullRequests(ctx, owner, name, after)
 		if err != nil {
@@ -129,6 +141,8 @@ func backfillPRs(ctx context.Context, st *store.Store, client *githubapi.Client,
 		if err := st.UpsertSyncState(ctx, ss); err != nil {
 			return err
 		}
+		total += len(page.PRs)
+		emit("prs", fmt.Sprintf("%d pull requests fetched", total))
 		if !page.HasNextPage {
 			return nil
 		}
@@ -137,8 +151,9 @@ func backfillPRs(ctx context.Context, st *store.Store, client *githubapi.Client,
 }
 
 func backfillIssues(ctx context.Context, st *store.Store, client *githubapi.Client,
-	repoID int64, owner, name string, ss *store.SyncState, span *datespan.Span) error {
+	repoID int64, owner, name string, ss *store.SyncState, span *datespan.Span, emit func(phase, detail string)) error {
 	after := ss.LastIssueCursor
+	total := 0
 	for {
 		page, err := client.FetchIssues(ctx, owner, name, after)
 		if err != nil {
@@ -157,6 +172,8 @@ func backfillIssues(ctx context.Context, st *store.Store, client *githubapi.Clie
 		if err := st.UpsertSyncState(ctx, ss); err != nil {
 			return err
 		}
+		total += len(page.Issues)
+		emit("issues", fmt.Sprintf("%d issues fetched", total))
 		if !page.HasNextPage {
 			return nil
 		}
@@ -165,8 +182,9 @@ func backfillIssues(ctx context.Context, st *store.Store, client *githubapi.Clie
 }
 
 func backfillReleases(ctx context.Context, st *store.Store, client *githubapi.Client,
-	repoID int64, owner, name string, ss *store.SyncState, span *datespan.Span) error {
+	repoID int64, owner, name string, ss *store.SyncState, span *datespan.Span, emit func(phase, detail string)) error {
 	after := ss.LastReleaseCursor
+	total := 0
 	for {
 		page, err := client.FetchReleases(ctx, owner, name, after)
 		if err != nil {
@@ -184,6 +202,8 @@ func backfillReleases(ctx context.Context, st *store.Store, client *githubapi.Cl
 		if err := st.UpsertSyncState(ctx, ss); err != nil {
 			return err
 		}
+		total += len(page.Releases)
+		emit("releases", fmt.Sprintf("%d releases fetched", total))
 		if !page.HasNextPage {
 			return nil
 		}

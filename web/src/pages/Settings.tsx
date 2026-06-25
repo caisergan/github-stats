@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getPatStatus, type PatStatus, type ImportResult } from "../api";
 import { PatForm } from "../components/PatForm";
+import { RateLimitPanel } from "../components/RateLimitPanel";
 import { FileDropImport } from "../components/FileDropImport";
 
 export default function Settings() {
@@ -25,6 +26,8 @@ export default function Settings() {
       </div>
 
       {status && <PatForm status={status} onChange={reload} />}
+
+      <RateLimitPanel />
 
       <div className="settings-section">
         <h2>Import repositories</h2>

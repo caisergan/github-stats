@@ -11,13 +11,14 @@ import { fmtRelative } from "../format";
 interface Props {
   kind: LatestKind;
   items: LatestItem[];
+  repoFullName?: string; // when set, rows link to the commit/PR/issue on GitHub
 }
 
 function isCommit(i: LatestItem): i is LatestCommit {
   return (i as LatestCommit).sha !== undefined;
 }
 
-export default function LatestList({ kind, items }: Props) {
+export default function LatestList({ kind, items, repoFullName }: Props) {
   if (items.length === 0) {
     return <div className="empty">Nothing yet.</div>;
   }
@@ -26,8 +27,8 @@ export default function LatestList({ kind, items }: Props) {
     <div className="latest">
       {items.map((item, i) => {
         if (isCommit(item)) {
-          return (
-            <div className="item" key={item.sha || i}>
+          const inner = (
+            <>
               <span className="ic green">
                 <I.commit style={{ width: 14, height: 14 }} />
               </span>
@@ -48,6 +49,22 @@ export default function LatestList({ kind, items }: Props) {
                 <span className="add">+{item.additions}</span>{" "}
                 <span className="del">−{item.deletions}</span>
               </span>
+            </>
+          );
+          return repoFullName ? (
+            <a
+              className="item link"
+              key={item.sha || i}
+              href={`https://github.com/${repoFullName}/commit/${item.sha}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open commit on GitHub"
+            >
+              {inner}
+            </a>
+          ) : (
+            <div className="item" key={item.sha || i}>
+              {inner}
             </div>
           );
         }
@@ -56,8 +73,8 @@ export default function LatestList({ kind, items }: Props) {
           const pr = item as LatestPR;
           const tone =
             pr.merged_at !== null ? "purple" : pr.closed_at !== null ? "red" : "green";
-          return (
-            <div className="item" key={"pr" + (pr.number || i)}>
+          const inner = (
+            <>
               <span className={"ic " + tone}>
                 <I.pr style={{ width: 14, height: 14 }} />
               </span>
@@ -75,14 +92,30 @@ export default function LatestList({ kind, items }: Props) {
                 <I.comment style={{ width: 13, height: 13 }} />
                 {pr.comments_count}
               </span>
+            </>
+          );
+          return repoFullName ? (
+            <a
+              className="item link"
+              key={"pr" + (pr.number || i)}
+              href={`https://github.com/${repoFullName}/pull/${pr.number}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open pull request on GitHub"
+            >
+              {inner}
+            </a>
+          ) : (
+            <div className="item" key={"pr" + (pr.number || i)}>
+              {inner}
             </div>
           );
         }
 
         const iss = item as LatestIssue;
         const tone = iss.closed_at !== null ? "purple" : "green";
-        return (
-          <div className="item" key={"is" + (iss.number || i)}>
+        const inner = (
+          <>
             <span className={"ic " + tone}>
               <I.issue style={{ width: 14, height: 14 }} />
             </span>
@@ -100,6 +133,22 @@ export default function LatestList({ kind, items }: Props) {
               <I.comment style={{ width: 13, height: 13 }} />
               {iss.comments_count}
             </span>
+          </>
+        );
+        return repoFullName ? (
+          <a
+            className="item link"
+            key={"is" + (iss.number || i)}
+            href={`https://github.com/${repoFullName}/issues/${iss.number}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open issue on GitHub"
+          >
+            {inner}
+          </a>
+        ) : (
+          <div className="item" key={"is" + (iss.number || i)}>
+            {inner}
           </div>
         );
       })}

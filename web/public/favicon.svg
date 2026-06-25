@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- App logo: white bar-chart on a dark rounded square (matches the topbar logo). -->
+  <rect width="32" height="32" rx="8" fill="#18181b"/>
+  <g transform="translate(7 7) scale(0.75)" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 21V10M9 21V4M15 21v-8M21 21V7"/>
+  </g>
+</svg>

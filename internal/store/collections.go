@@ -151,7 +151,7 @@ func (s *Store) ListCollectionRepos(ctx context.Context, userID, collectionID in
 	}
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT r.id, r.github_id, r.full_name, r.is_private, r.default_branch,
-		       r.description, r.stargazers, r.forks, r.primary_language, r.language_color, r.languages, r.created_at
+		       r.description, r.stargazers, r.forks, r.primary_language, r.language_color, r.languages, r.commit_count, r.created_at
 		FROM collection_repos cr
 		JOIN repos r ON r.id = cr.repo_id
 		WHERE cr.collection_id = ?
@@ -166,7 +166,7 @@ func (s *Store) ListCollectionRepos(ctx context.Context, userID, collectionID in
 		var r Repo
 		var priv int
 		if err := rows.Scan(&r.ID, &r.GitHubID, &r.FullName, &priv,
-			&r.DefaultBranch, &r.Description, &r.Stargazers, &r.Forks, &r.PrimaryLanguage, &r.LanguageColor, &r.Languages, &r.CreatedAt); err != nil {
+			&r.DefaultBranch, &r.Description, &r.Stargazers, &r.Forks, &r.PrimaryLanguage, &r.LanguageColor, &r.Languages, &r.CommitCount, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		r.IsPrivate = priv != 0

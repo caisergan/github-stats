@@ -185,6 +185,19 @@ a { color: inherit; text-decoration: none; }
 .btn.sm { height: 30px; padding: 0 10px; font-size: 12.5px; }
 .btn.icon { width: 36px; padding: 0; }
 .btn.icon.sm { width: 30px; }
+/* destructive: outline for the trigger, solid for the confirm action */
+.btn.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, transparent); }
+.btn.danger:hover { background: var(--red-bg); border-color: var(--red); }
+.btn.danger-solid { background: var(--red); color: #fff; border-color: var(--red); box-shadow: var(--shadow-sm); }
+.btn.danger-solid:hover { background: color-mix(in srgb, var(--red) 88%, #000); }
+
+/* inline confirmation popover (e.g. Untrack repo) */
+.confirm-pop {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 50;
+  width: 320px; text-align: left; box-shadow: var(--shadow-lg);
+}
+.confirm-pop .ct { font-weight: 650; font-size: 13.5px; margin: 0 0 4px; }
+.confirm-pop .cs { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; }
 
 /* ---------- inputs ---------- */
 .input {
@@ -397,6 +410,8 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
 .rank.r1 { background: var(--chart); color: var(--bg); }
 
 .who { display: inline-flex; align-items: center; gap: 8px; }
+a.who.link { cursor: pointer; color: inherit; }
+a.who.link:hover span:last-child { text-decoration: underline; text-underline-offset: 2px; color: var(--fg); }
 .avatar { border-radius: 99px; border: 1px solid var(--border); background: var(--surface-2); flex: none; object-fit: cover; }
 .contrib-bar { height: 6px; border-radius: 99px; background: var(--chart); }
 .contrib-track { height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; min-width: 60px; }
@@ -414,9 +429,23 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
 .latest .item .ttl { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .latest .item .sub { font-size: 11.5px; color: var(--muted); margin-top: 1px; display: flex; align-items: center; gap: 6px; }
 .latest .item .sha { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
-.latest .item .churn { font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.latest .item .churn { font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; letter-spacing: -0.01em; }
 .latest .item .churn .add { color: var(--green); }
 .latest .item .churn .del { color: var(--red); }
+
+/* clickable commit rows (link to GitHub) */
+.latest a.item.link { cursor: pointer; color: inherit; text-decoration: none; transition: background .1s; }
+.latest a.item.link:hover { background: var(--surface-2); }
+.latest a.item.link:hover .ttl { text-decoration: underline; text-underline-offset: 2px; }
+
+/* commits tab footer: load-more + load-all */
+.commits-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.commits-foot .lm { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.commits-foot .muted-note { font-size: 12px; color: var(--muted); }
+.load-all-status { font-size: 12.5px; color: var(--muted); }
+.load-all-status.warn { color: var(--amber); }
+.load-all-status.error { color: var(--red); }
+.load-all-status.done { color: var(--green); }
 
 /* chart bits */
 .chart-wrap { width: 100%; }
@@ -446,6 +475,7 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
 .progress-log .ln .ph { color: var(--accent); }
 [data-theme="dark"] .progress-log .ln .ph { color: #e4e4e7; }
 .progress-log .ln.done { color: var(--green); }
+.progress-log .ln.warn { color: var(--amber); }
 .progress-log .ln.error { color: var(--red); }
 
 /* sign-in */
@@ -547,6 +577,20 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
   font-size: 13px;
   margin: 8px 0 0;
 }
+
+/* Settings: GitHub API rate-limit meters */
+.rl-card { display: flex; flex-direction: column; gap: 16px; }
+.rl-row { display: flex; flex-direction: column; gap: 7px; }
+.rl-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.rl-name { font-weight: 600; font-size: 13.5px; }
+.rl-fig { font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.rl-bar { height: 10px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.rl-bar > .fill { display: block; height: 100%; border-radius: 99px; transition: width .5s cubic-bezier(.2,.7,.2,1); }
+.rl-bar > .fill.green { background: var(--green); }
+.rl-bar > .fill.amber { background: var(--amber); }
+.rl-bar > .fill.red { background: var(--red); }
+.rl-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--muted); }
+.rl-foot { display: flex; justify-content: flex-end; }
 
 /* Settings + PAT honesty note */
 .settings-section { margin: 24px 0; max-width: 640px; }

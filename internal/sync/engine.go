@@ -139,7 +139,12 @@ func (e *Engine) processNextJob(ctx context.Context) (bool, error) {
 			reset = e.cfg.Now().Add(e.cfg.FailBackoff)
 		}
 		_ = e.store.RescheduleJob(ctx, job.ID, reset)
-		e.bc.publish(job.RepoID, Event{RepoID: job.RepoID, Phase: job.Kind, Message: "rate-limited; rescheduled"})
+		// Surface a non-terminal "throttled" event (Done:false) so the UI can tell
+		// the user the sync was rate-limited but will resume on its own — the
+		// open SSE stream still receives the eventual completion of the re-run.
+		secs := int(reset.Sub(e.cfg.Now()).Round(time.Second).Seconds())
+		msg := fmt.Sprintf("GitHub rate-limited this sync — resuming automatically in ~%ds", secs)
+		e.bc.publish(job.RepoID, Event{RepoID: job.RepoID, Phase: "throttled", Message: msg})
 		return true, nil
 	}
 	// Genuine error → record the failure (reschedule-with-backoff or terminal).
@@ -148,13 +153,17 @@ func (e *Engine) processNextJob(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// runJob dispatches by kind.
+// runJob dispatches by kind. It threads a progress callback that fans per-page
+// fetch counts out to the repo's SSE subscribers ("fetched N commits…").
 func (e *Engine) runJob(ctx context.Context, job *store.SyncJob, client *githubapi.Client) error {
+	emit := func(phase, detail string) {
+		e.bc.publish(job.RepoID, Event{RepoID: job.RepoID, Phase: phase, Message: detail})
+	}
 	switch job.Kind {
 	case "backfill":
-		return backfill.Run(ctx, e.store, client, job.RepoID)
+		return backfill.Run(ctx, e.store, client, job.RepoID, emit)
 	case "delta":
-		return RunDelta(ctx, e.store, client, job.RepoID, e.cfg.Now)
+		return RunDelta(ctx, e.store, client, job.RepoID, e.cfg.Now, emit)
 	default:
 		return fmt.Errorf("unknown job kind %q", job.Kind)
 	}

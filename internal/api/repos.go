@@ -92,9 +92,10 @@ func (s *Server) addRepo(w http.ResponseWriter, r *http.Request) {
 			// GitHub returns "could not resolve" for both missing repos and private
 			// repos a token can't see (it won't leak which). Give the user the fix.
 			http.Error(w, "Couldn't access "+owner+"/"+name+". It doesn't exist, or "+
-				`your GitHub token can't see it. Private repositories need the "repo" `+
-				"scope — reconnect GitHub, or add a personal access token with the "+
-				`"repo" scope in Settings.`, http.StatusNotFound)
+				"your token can't see it. The GitHub login is read-only and covers "+
+				"public repositories; to track a private repository, add a fine-grained "+
+				"personal access token with read-only access to it (Contents: Read) in "+
+				"Settings.", http.StatusNotFound)
 			return
 		}
 		http.Error(w, "fetch repo failed: "+err.Error(), http.StatusBadGateway)
@@ -138,7 +139,8 @@ func (s *Server) listRepos(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// untrackRepo handles DELETE /api/repos/{id}.
+// untrackRepo handles DELETE /api/repos/{id}: stops tracking for the caller and,
+// once no user tracks the repo anymore, hard-deletes all of its stored data.
 func (s *Server) untrackRepo(w http.ResponseWriter, r *http.Request) {
 	u, ok := auth.UserFromContext(r.Context())
 	if !ok {
@@ -153,6 +155,20 @@ func (s *Server) untrackRepo(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.UntrackRepo(r.Context(), u.ID, repoID); err != nil {
 		http.Error(w, "untrack failed", http.StatusInternalServerError)
 		return
+	}
+	// Once no user tracks the repo, hard-delete all of its stored data (commits,
+	// PRs, issues, stats, sync state, jobs, cache). This only ever touches the
+	// local DB — never GitHub.
+	n, err := s.store.CountTrackers(r.Context(), repoID)
+	if err != nil {
+		http.Error(w, "untrack failed", http.StatusInternalServerError)
+		return
+	}
+	if n == 0 {
+		if err := s.store.PurgeRepo(r.Context(), repoID); err != nil {
+			http.Error(w, "purge failed", http.StatusInternalServerError)
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -183,6 +199,77 @@ func (s *Server) refreshRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// loadAllCommits handles POST /api/repos/{id}/load-all-commits: enqueue a
+// backfill to ingest the repo's FULL commit history. The backfill is resumable
+// (persisted cursor) and quota-aware — if GitHub's API quota is exhausted the
+// job is rescheduled to the reset time and auto-resumes, so a too-big repo
+// finishes across multiple windows without losing progress. If a sync job is
+// already open for the repo it's a no-op (the open job already covers it).
+func (s *Server) loadAllCommits(w http.ResponseWriter, r *http.Request) {
+	_, repoID, ok := s.requireTracked(w, r)
+	if !ok {
+		return
+	}
+	open, err := s.store.HasOpenJob(r.Context(), repoID)
+	if err != nil {
+		http.Error(w, "lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if !open {
+		if _, err := s.engine.TriggerBackfill(r.Context(), repoID); err != nil {
+			http.Error(w, "enqueue failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// syncStatusJSON reports a repo's most relevant sync job so the UI can show
+// "loading…" / "waiting for quota until X" even after a reload (the SSE stream
+// only carries live events). Active is true while pending or running.
+type syncStatusJSON struct {
+	Kind      string  `json:"kind"`
+	Status    string  `json:"status"`
+	NextRunAt *string `json:"next_run_at"`
+	Attempts  int     `json:"attempts"`
+	LastError string  `json:"last_error"`
+	Active    bool    `json:"active"`
+}
+
+// repoSyncStatus handles GET /api/repos/{id}/sync/status: the newest open
+// (pending/running) job, else the newest job overall, else an empty object.
+func (s *Server) repoSyncStatus(w http.ResponseWriter, r *http.Request) {
+	_, repoID, ok := s.requireTracked(w, r)
+	if !ok {
+		return
+	}
+	jobs, err := s.store.ListJobsForRepo(r.Context(), repoID)
+	if err != nil {
+		http.Error(w, "lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if len(jobs) == 0 {
+		writeJSON(w, http.StatusOK, syncStatusJSON{})
+		return
+	}
+	job := jobs[0] // newest (ListJobsForRepo is id DESC)
+	for _, j := range jobs {
+		if j.Status == "pending" || j.Status == "running" {
+			job = j
+			break
+		}
+	}
+	nr := job.NextRunAt.UTC().Format("2006-01-02T15:04:05Z07:00")
+	writeJSON(w, http.StatusOK, syncStatusJSON{
+		Kind:      job.Kind,
+		Status:    job.Status,
+		NextRunAt: &nr,
+		Attempts:  job.Attempts,
+		LastError: job.LastError,
+		Active:    job.Status == "pending" || job.Status == "running",
+	})
 }
 
 func repoIDParam(r *http.Request) (int64, error) {

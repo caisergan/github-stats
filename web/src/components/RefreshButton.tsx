@@ -11,7 +11,7 @@ interface LogLine {
   id: number;
   phase: string;
   text: string;
-  tone: "" | "error" | "done";
+  tone: "" | "error" | "warn" | "done";
 }
 
 export default function RefreshButton({ repoID, onComplete }: Props) {
@@ -20,7 +20,7 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
   const [open, setOpen] = useState(false);
   const handleRef = useRef<SyncStreamHandle | null>(null);
   const seq = useRef(0);
-  const logEndRef = useRef<HTMLDivElement | null>(null);
+  const logBoxRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
   // Close any open stream on unmount.
@@ -38,10 +38,12 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  // Auto-scroll the log to the bottom as lines arrive (while open).
+  // Auto-scroll the log to the bottom as lines arrive — scoped to the
+  // dropdown's own scroll container so the page itself never moves.
   useEffect(() => {
-    if (open && typeof logEndRef.current?.scrollIntoView === "function") {
-      logEndRef.current.scrollIntoView({ behavior: "smooth" });
+    const box = logBoxRef.current;
+    if (open && box) {
+      box.scrollTop = box.scrollHeight;
     }
   }, [lines, open]);
 
@@ -66,7 +68,9 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
     }
     handleRef.current = openSyncStream(repoID, {
       onEvent: (ev: SyncEvent) => {
-        push(ev.message || ev.phase, ev.phase === "error" ? "error" : "", ev.phase);
+        const tone: LogLine["tone"] =
+          ev.phase === "error" ? "error" : ev.phase === "throttled" ? "warn" : "";
+        push(ev.message || ev.phase, tone, ev.phase);
       },
       onDone: (ev: SyncEvent) => {
         push(ev.message || "done", ev.phase === "error" ? "error" : "done", ev.phase || "done");
@@ -83,7 +87,11 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
   }
 
   return (
-    <div className="menu-wrap" ref={wrapRef} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+    <div
+      className="menu-wrap"
+      ref={wrapRef}
+      style={{ position: "relative", display: "inline-flex", gap: 6, alignItems: "center" }}
+    >
       <button className="btn primary" onClick={start} disabled={running}>
         <I.refresh
           style={
@@ -115,6 +123,7 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
 
       {open && lines.length > 0 && (
         <div
+          ref={logBoxRef}
           className="progress-log fade-in"
           style={{
             position: "absolute",
@@ -123,6 +132,7 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
             width: 360,
             marginTop: 0,
             maxHeight: 240,
+            overflowY: "auto",
             zIndex: 60,
             boxShadow: "var(--shadow-lg)",
           }}
@@ -133,7 +143,6 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
               <span>{l.text}</span>
             </div>
           ))}
-          <div ref={logEndRef} />
         </div>
       )}
     </div>

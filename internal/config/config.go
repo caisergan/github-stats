@@ -43,7 +43,12 @@ func Load(getenv func(string) string) (Config, error) {
 		BaseURL:            get(getenv, "BASE_URL", "http://localhost:8080"),
 		GitHubClientID:     getenv("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: getenv("GITHUB_CLIENT_SECRET"),
-		GitHubScopes:       get(getenv, "GITHUB_SCOPES", "read:user repo"),
+		// Read-only by design: the app only ever READS GitHub data, so the OAuth
+		// token deliberately carries no write/delete scope. "read:user" covers
+		// login + public repositories; private repos are reached via a separate,
+		// user-supplied read-only PAT (see settings). This guarantees that even a
+		// bug here can never modify or delete a repository on GitHub.
+		GitHubScopes:       get(getenv, "GITHUB_SCOPES", "read:user"),
 		SessionTTL:         30 * 24 * time.Hour,
 		GitHubOAuthBaseURL: get(getenv, "GITHUB_OAUTH_BASE_URL", "https://github.com"),
 		GitHubAPIBaseURL:   get(getenv, "GITHUB_API_BASE_URL", "https://api.github.com"),

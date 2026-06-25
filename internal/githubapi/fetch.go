@@ -45,7 +45,10 @@ query($owner:String!, $name:String!) {
     description
     stargazerCount
     forkCount
-    defaultBranchRef { name }
+    defaultBranchRef {
+      name
+      target { ... on Commit { history { totalCount } } }
+    }
     primaryLanguage { name color }
     languages(first: 12, orderBy: {field: SIZE, direction: DESC}) {
       totalSize
@@ -67,7 +70,12 @@ func (c *Client) FetchRepoMeta(ctx context.Context, owner, name string) (*store.
 			StargazerCount int64  `json:"stargazerCount"`
 			ForkCount      int64  `json:"forkCount"`
 			DefaultBranch  struct {
-				Name string `json:"name"`
+				Name   string `json:"name"`
+				Target struct {
+					History struct {
+						TotalCount int64 `json:"totalCount"`
+					} `json:"history"`
+				} `json:"target"`
 			} `json:"defaultBranchRef"`
 			PrimaryLanguage struct {
 				Name  string `json:"name"`
@@ -99,6 +107,7 @@ func (c *Client) FetchRepoMeta(ctx context.Context, owner, name string) (*store.
 		Forks:           data.Repository.ForkCount,
 		PrimaryLanguage: data.Repository.PrimaryLanguage.Name,
 		LanguageColor:   data.Repository.PrimaryLanguage.Color,
+		CommitCount:     data.Repository.DefaultBranch.Target.History.TotalCount,
 	}
 	// Marshal the language breakdown (name/color/size, desc by size) to JSON for
 	// the repos.languages column; always at least "[]".

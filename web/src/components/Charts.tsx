@@ -430,7 +430,13 @@ export function Leaderboard({ result, compact }: LeaderboardProps) {
               <span className={"rank" + (i === 0 ? " r1" : "")}>{i + 1}</span>
             </td>
             <td>
-              <span className="who">
+              <a
+                className="who link"
+                href={`https://github.com/${r.login}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Open ${r.login} on GitHub`}
+              >
                 {r.img ? (
                   <img
                     className="avatar"
@@ -456,7 +462,7 @@ export function Leaderboard({ result, compact }: LeaderboardProps) {
                   </span>
                 )}
                 <span style={{ fontWeight: 500 }}>{r.login}</span>
-              </span>
+              </a>
             </td>
             <td className="num">
               <b className="tnum">{r.commits.toLocaleString("en-US")}</b>
@@ -512,6 +518,8 @@ export function ScalarStat({ result }: ScalarStatProps) {
 
 interface ContributionHeatmapProps {
   weeks: number[][];
+  /** Trailing-period phrase shown after the count, e.g. "in the last 90 days". */
+  label?: string;
 }
 
 const MONTH_ABBR = [
@@ -529,7 +537,7 @@ const MONTH_ABBR = [
   "Dec",
 ];
 
-export function ContributionHeatmap({ weeks }: ContributionHeatmapProps) {
+export function ContributionHeatmap({ weeks, label = "in the last year" }: ContributionHeatmapProps) {
   const tip = useTip();
   const total = weeks.reduce(
     (a, wk) => a + wk.reduce((b, d) => b + d, 0),
@@ -571,7 +579,7 @@ export function ContributionHeatmap({ weeks }: ContributionHeatmapProps) {
           <b style={{ color: "var(--fg)", fontWeight: 650 }}>
             {total.toLocaleString("en-US")}
           </b>{" "}
-          contributions in the last year
+          contributions {label}
         </span>
       </div>
       <div ref={wrapRef} style={{ paddingBottom: 4 }}>

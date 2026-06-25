@@ -206,6 +206,62 @@ func TestUntrackRepo(t *testing.T) {
 	}
 }
 
+func TestUntrackRepoHardDeletesWhenOrphaned(t *testing.T) {
+	srv, st, cookie := serverWithGitHub(t, "http://unused") // seeds user 1 (neo)
+	ctx := context.Background()
+	repoID, _ := st.UpsertRepo(ctx, &store.Repo{GitHubID: 42, FullName: "octo/gone", DefaultBranch: "main"})
+	st.TrackRepo(ctx, 1, repoID)
+	if _, err := st.DB.ExecContext(ctx,
+		`INSERT INTO commits(repo_id, sha, committed_at) VALUES (?, 'deadbeef', '2026-01-01T00:00:00Z')`, repoID); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/repos/"+strconv.FormatInt(repoID, 10), nil)
+	req.AddCookie(cookie)
+	withCSRF(req)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (body %s)", rec.Code, rec.Body.String())
+	}
+
+	// The last tracker left, so the repo and its data are hard-deleted.
+	if _, err := st.GetRepoByFullName(ctx, "octo/gone"); err != store.ErrNotFound {
+		t.Fatalf("repo not hard-deleted: %v", err)
+	}
+	var n int
+	st.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM commits WHERE repo_id = ?`, repoID).Scan(&n)
+	if n != 0 {
+		t.Fatalf("commits not purged: %d", n)
+	}
+}
+
+func TestUntrackRepoKeepsDataWhileOthersTrack(t *testing.T) {
+	srv, st, cookie := serverWithGitHub(t, "http://unused") // seeds user 1 (neo)
+	ctx := context.Background()
+	uid2, _ := st.UpsertUser(ctx, &store.User{GitHubID: 2, Login: "trinity"})
+	repoID, _ := st.UpsertRepo(ctx, &store.Repo{GitHubID: 7, FullName: "octo/shared", DefaultBranch: "main"})
+	st.TrackRepo(ctx, 1, repoID)
+	st.TrackRepo(ctx, uid2, repoID)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/repos/"+strconv.FormatInt(repoID, 10), nil)
+	req.AddCookie(cookie) // user 1 untracks
+	withCSRF(req)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+
+	// User 2 still tracks it, so nothing is purged.
+	if _, err := st.GetRepoByFullName(ctx, "octo/shared"); err != nil {
+		t.Fatalf("repo wrongly purged while still tracked: %v", err)
+	}
+	if tracked, _ := st.IsTracked(ctx, uid2, repoID); !tracked {
+		t.Fatal("second user's tracking was removed")
+	}
+}
+
 func TestRefreshRepoEnqueuesDelta(t *testing.T) {
 	srv, st, cookie := serverWithGitHub(t, "http://unused")
 	ctx := context.Background()
@@ -224,6 +280,77 @@ func TestRefreshRepoEnqueuesDelta(t *testing.T) {
 	jobs, _ := st.ListJobsForRepo(ctx, repoID)
 	if len(jobs) != 1 || jobs[0].Kind != "delta" {
 		t.Fatalf("expected 1 delta job, got %+v", jobs)
+	}
+}
+
+func TestLoadAllCommitsEnqueuesBackfill(t *testing.T) {
+	srv, st, cookie := serverWithGitHub(t, "http://unused")
+	ctx := context.Background()
+	repoID, _ := st.UpsertRepo(ctx, &store.Repo{GitHubID: 5, FullName: "a/b", DefaultBranch: "main"})
+	st.TrackRepo(ctx, 1, repoID)
+	path := "/api/repos/" + strconv.FormatInt(repoID, 10) + "/load-all-commits"
+
+	post := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.AddCookie(cookie)
+		withCSRF(req)
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := post(); rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (body %s)", rec.Code, rec.Body.String())
+	}
+	jobs, _ := st.ListJobsForRepo(ctx, repoID)
+	if len(jobs) != 1 || jobs[0].Kind != "backfill" {
+		t.Fatalf("expected 1 backfill job, got %+v", jobs)
+	}
+
+	// Idempotent while a job is open: a second call enqueues nothing more.
+	if rec := post(); rec.Code != http.StatusAccepted {
+		t.Fatalf("second status = %d, want 202", rec.Code)
+	}
+	jobs2, _ := st.ListJobsForRepo(ctx, repoID)
+	if len(jobs2) != 1 {
+		t.Fatalf("open job should dedupe; got %d jobs", len(jobs2))
+	}
+}
+
+func TestRepoSyncStatusReportsActiveJob(t *testing.T) {
+	srv, st, _ := serverWithGitHub(t, "http://unused")
+	ctx := context.Background()
+	repoID, _ := st.UpsertRepo(ctx, &store.Repo{GitHubID: 6, FullName: "c/d", DefaultBranch: "main"})
+	st.TrackRepo(ctx, 1, repoID)
+	path := "/api/repos/" + strconv.FormatInt(repoID, 10) + "/sync/status"
+
+	// No jobs yet → idle (empty) status.
+	rec := authedGet(t, srv, st, path)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var s0 struct {
+		Status string `json:"status"`
+		Active bool   `json:"active"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &s0)
+	if s0.Active || s0.Status != "" {
+		t.Fatalf("idle status = %+v, want empty/inactive", s0)
+	}
+
+	// Enqueue a backfill → status reports it active.
+	if _, err := st.EnqueueJob(ctx, repoID, "backfill", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	rec2 := authedGet(t, srv, st, path)
+	var s1 struct {
+		Kind   string `json:"kind"`
+		Status string `json:"status"`
+		Active bool   `json:"active"`
+	}
+	json.Unmarshal(rec2.Body.Bytes(), &s1)
+	if !s1.Active || s1.Kind != "backfill" || s1.Status != "pending" {
+		t.Fatalf("active status = %+v, want backfill/pending/active", s1)
 	}
 }
 

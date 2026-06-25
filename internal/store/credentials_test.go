@@ -39,3 +39,36 @@ func TestGetCredentialNotFound(t *testing.T) {
 		t.Fatalf("got %v, want ErrNotFound", err)
 	}
 }
+
+func TestDeleteCredential(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	uid := seedUser(t, s)
+
+	if err := s.UpsertCredential(ctx, &Credential{
+		UserID: uid, Kind: "pat", EncToken: "enc", Scopes: "octocat",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Unrelated credential of a different kind must survive the delete.
+	if err := s.UpsertCredential(ctx, &Credential{
+		UserID: uid, Kind: "oauth", EncToken: "enc-oauth", Scopes: "repo",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteCredential(ctx, uid, "pat"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetCredential(ctx, uid, "pat"); err != ErrNotFound {
+		t.Fatalf("pat still present: %v", err)
+	}
+	if _, err := s.GetCredential(ctx, uid, "oauth"); err != nil {
+		t.Fatalf("oauth credential wrongly removed: %v", err)
+	}
+
+	// Deleting a missing credential is a no-op (idempotent).
+	if err := s.DeleteCredential(ctx, uid, "pat"); err != nil {
+		t.Fatalf("delete of missing credential returned error: %v", err)
+	}
+}

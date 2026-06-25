@@ -75,9 +75,7 @@ func (s *Server) deletePAT(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if _, err := s.store.DB.ExecContext(r.Context(),
-		`DELETE FROM credentials WHERE user_id = ? AND kind = 'pat'`, u.ID,
-	); err != nil {
+	if err := s.store.DeleteCredential(r.Context(), u.ID, "pat"); err != nil {
 		http.Error(w, "delete failed", http.StatusInternalServerError)
 		return
 	}

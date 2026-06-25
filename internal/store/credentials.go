@@ -41,3 +41,13 @@ func (s *Store) GetCredential(ctx context.Context, userID int64, kind string) (*
 	}
 	return &c, nil
 }
+
+// DeleteCredential removes the credential for (user_id, kind). Deleting a
+// missing credential is a no-op (no error), matching the idempotent semantics
+// the PAT settings handler relies on.
+func (s *Store) DeleteCredential(ctx context.Context, userID int64, kind string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`DELETE FROM credentials WHERE user_id = ? AND kind = ?`, userID, kind,
+	)
+	return err
+}

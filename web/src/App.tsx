@@ -16,8 +16,11 @@ import WorkspaceInsights from "./pages/WorkspaceInsights";
 import Settings from "./pages/Settings";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { getTheme, setTheme, type Theme } from "./theme";
-import { logout } from "./api";
-import * as D from "./data";
+import { logout, fetchMe } from "./api";
+import type { Repo, Me } from "./api";
+import { useAsync } from "./hooks/useAsync";
+import { useRepos } from "./hooks/useRepos";
+import { useCollections } from "./hooks/useCollections";
 
 const ACCENTS = ["#18181b", "#2563eb", "#059669", "#7c3aed", "#dc2626"];
 const FONTS = {
@@ -44,7 +47,7 @@ function accentFg(hex: string) {
 }
 
 interface UserMenuProps {
-  me: D.MockMe;
+  me: Me;
 }
 
 function UserMenu({ me }: UserMenuProps) {
@@ -85,7 +88,7 @@ function UserMenu({ me }: UserMenuProps) {
       }
     >
       <div className="mhead">
-        Signed in as<b>{me.name}</b>
+        Signed in as<b>{me.login}</b>
       </div>
       <div className="sep" />
       <Link to="/settings" className="mi">
@@ -141,17 +144,13 @@ function SignIn() {
 }
 
 interface RepoDetailWrapperProps {
-  repos: D.MockRepo[];
+  resolve: (owner: string, repo: string) => Repo | null;
   onBack: () => void;
 }
 
-function RepoDetailWrapper({ repos, onBack }: RepoDetailWrapperProps) {
+function RepoDetailWrapper({ resolve, onBack }: RepoDetailWrapperProps) {
   const { owner = "", repo = "" } = useParams();
-  const matched = repos.find(
-    (r) =>
-      r.owner.toLowerCase() === owner.toLowerCase() &&
-      r.name.toLowerCase() === repo.toLowerCase(),
-  );
+  const matched = resolve(owner, repo);
 
   if (!matched) {
     return (
@@ -172,10 +171,12 @@ export default function App() {
   // Initialize the in-memory theme from the persisted choice (theme.ts) so the
   // tweaks state, the header ThemeToggle, and localStorage all agree on mount.
   const [tweaks, setTweak] = useState({ ...TWEAK_DEFAULTS, theme: getTheme() });
-  const [repos, setRepos] = useState<D.MockRepo[]>(D.REPOS);
-  const [collections, setCollections] = useState<D.MockCollection[]>(D.COLLECTIONS);
+  const meState = useAsync<Me | null>(fetchMe, []);
+  const reposApi = useRepos();
+  const collectionsApi = useCollections();
+  const repos = reposApi.repos;
+  const collections = collectionsApi.collections;
   const [showTweaks, setShowTweaks] = useState(false);
-  const [me] = useState<D.MockMe | null>(D.ME);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -199,51 +200,22 @@ export default function App() {
     setTweak((prev) => ({ ...prev, [key]: val }));
   };
 
-  const handleOpenRepo = (repo: D.MockRepo) => {
-    navigate(`/${repo.owner}/${repo.name}`);
+  const handleOpenRepo = (repo: Repo) => {
+    navigate(`/${repo.full_name}`);
     window.scrollTo(0, 0);
   };
 
-  const handleAddRepo = (fullName: string) => {
-    const [owner, name] = fullName.split("/");
-    const exists = repos.find(
-      (r) => r.full_name.toLowerCase() === fullName.toLowerCase(),
-    );
-    if (exists) {
-      handleOpenRepo(exists);
-      return;
-    }
-    const seed = 700 + repos.length * 37;
-    const nr: D.MockRepo = {
-      id: Date.now(),
-      owner,
-      name,
-      full_name: fullName,
-      is_private: false,
-      default_branch: "main",
-      description: "Newly tracked — initial sync queued.",
-      lang: "Go",
-      langColor: "#00ADD8",
-      stargazers: 0,
-      forks: 0,
-      open_issues: 0,
-      open_prs: 0,
-      contributors: 0,
-      releases: 0,
-      commit_rate: 0,
-      issue_rate: 0,
-      pr_rate: 0,
-      sync_status: "pending",
-      last_synced_at: null,
-      seed,
-    };
-    setRepos((p) => [nr, ...p]);
+  const handleAddRepo = async (fullName: string) => {
+    const created = await reposApi.add(fullName);
+    handleOpenRepo(created);
   };
 
-  const handleAddCollection = (c: D.MockCollection) => {
-    setCollections((p) => [...p, c]);
+  const handleAddCollection = async (name: string) => {
+    await collectionsApi.create(name);
   };
 
+  if (meState.loading) return <div className="app-loading">Loading…</div>;
+  const me = meState.data;
   if (!me) return <SignIn />;
 
   const path = location.pathname;
@@ -315,7 +287,7 @@ export default function App() {
         <Route
           path="/:owner/:repo"
           element={
-            <RepoDetailWrapper repos={repos} onBack={() => navigate("/")} />
+            <RepoDetailWrapper resolve={reposApi.resolve} onBack={() => navigate("/")} />
           }
         />
       </Routes>

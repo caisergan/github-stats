@@ -17,19 +17,33 @@ interface LogLine {
 export default function RefreshButton({ repoID, onComplete }: Props) {
   const [running, setRunning] = useState(false);
   const [lines, setLines] = useState<LogLine[]>([]);
+  const [open, setOpen] = useState(false);
   const handleRef = useRef<SyncStreamHandle | null>(null);
   const seq = useRef(0);
   const logEndRef = useRef<HTMLDivElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
 
   // Close any open stream on unmount.
   useEffect(() => () => handleRef.current?.close(), []);
 
-  // Auto-scroll the log to the bottom as lines arrive.
+  // Dismiss the progress dropdown on an outside click.
   useEffect(() => {
-    if (typeof logEndRef.current?.scrollIntoView === "function") {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  // Auto-scroll the log to the bottom as lines arrive (while open).
+  useEffect(() => {
+    if (open && typeof logEndRef.current?.scrollIntoView === "function") {
       logEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [lines]);
+  }, [lines, open]);
 
   function push(text: string, tone: LogLine["tone"], phase: string) {
     seq.current += 1;
@@ -41,6 +55,7 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
     if (running) return;
     setRunning(true);
     setLines([]);
+    setOpen(true); // reveal progress as it streams
     push("initializing repository synchronization…", "", "init");
     try {
       await refreshRepo(repoID);
@@ -68,7 +83,7 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
   }
 
   return (
-    <div style={{ width: running || lines.length ? "100%" : "auto" }}>
+    <div className="menu-wrap" ref={wrapRef} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
       <button className="btn primary" onClick={start} disabled={running}>
         <I.refresh
           style={
@@ -79,8 +94,39 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
         />
         {running ? "Refreshing…" : "Refresh now"}
       </button>
+
       {lines.length > 0 && (
-        <div className="progress-log">
+        <button
+          className="btn ghost icon"
+          onClick={() => setOpen((o) => !o)}
+          title="Sync progress"
+          aria-label="Sync progress"
+        >
+          <I.chevDown
+            style={{
+              width: 15,
+              height: 15,
+              transition: "transform .15s ease",
+              transform: open ? "rotate(180deg)" : "none",
+            }}
+          />
+        </button>
+      )}
+
+      {open && lines.length > 0 && (
+        <div
+          className="progress-log fade-in"
+          style={{
+            position: "absolute",
+            right: 0,
+            top: "calc(100% + 6px)",
+            width: 360,
+            marginTop: 0,
+            maxHeight: 240,
+            zIndex: 60,
+            boxShadow: "var(--shadow-lg)",
+          }}
+        >
           {lines.map((l) => (
             <div key={l.id} className={"ln " + l.tone}>
               <span className="ph">{l.phase}</span>

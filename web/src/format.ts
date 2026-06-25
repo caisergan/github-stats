@@ -73,3 +73,16 @@ export function fmtNullableTs(iso: string | null, now: number = Date.now()): str
   if (!iso) return "never";
   return fmtRelative(iso, now);
 }
+
+/** Deterministic GitHub avatar URL for a login (the API omits avatar URLs on
+ *  leaderboard/latest rows, so we derive them client-side). */
+export function avatarURL(login: string): string {
+  return `https://avatars.githubusercontent.com/${login}?size=48`;
+}
+
+/** Split a "owner/name" full_name into its parts. Extra slashes stay in `name`. */
+export function splitRepo(fullName: string): { owner: string; name: string } {
+  const i = fullName.indexOf("/");
+  if (i < 0) return { owner: fullName, name: "" };
+  return { owner: fullName.slice(0, i), name: fullName.slice(i + 1) };
+}

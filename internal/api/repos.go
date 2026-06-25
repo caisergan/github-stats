@@ -22,6 +22,8 @@ type repoJSON struct {
 	Description   string  `json:"description"`
 	Stargazers    int64   `json:"stargazers"`
 	Forks         int64   `json:"forks"`
+	Language      string  `json:"language"`
+	LanguageColor string  `json:"language_color"`
 	SyncStatus    string  `json:"sync_status"`
 	LastSyncedAt  *string `json:"last_synced_at"`
 }
@@ -85,6 +87,15 @@ func (s *Server) addRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	meta, err := client.FetchRepoMeta(r.Context(), owner, name)
 	if err != nil {
+		if repoInaccessible(err) {
+			// GitHub returns "could not resolve" for both missing repos and private
+			// repos a token can't see (it won't leak which). Give the user the fix.
+			http.Error(w, "Couldn't access "+owner+"/"+name+". It doesn't exist, or "+
+				`your GitHub token can't see it. Private repositories need the "repo" `+
+				"scope — reconnect GitHub, or add a personal access token with the "+
+				`"repo" scope in Settings.`, http.StatusNotFound)
+			return
+		}
 		http.Error(w, "fetch repo failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -186,6 +197,8 @@ func toRepoJSON(repo *store.Repo, repoID int64, ss *store.SyncState) repoJSON {
 		Description:   repo.Description,
 		Stargazers:    repo.Stargazers,
 		Forks:         repo.Forks,
+		Language:      repo.PrimaryLanguage,
+		LanguageColor: repo.LanguageColor,
 	}
 	if ss != nil {
 		j.SyncStatus = ss.Status
@@ -202,4 +215,14 @@ func toRepoJSON(repo *store.Repo, repoID int64, ss *store.SyncState) repoJSON {
 func splitFullName(fullName string) (owner, name string) {
 	owner, name, _ = strings.Cut(fullName, "/")
 	return owner, name
+}
+
+// repoInaccessible reports whether a FetchRepoMeta error means GitHub couldn't
+// resolve the repository for this token — i.e. it doesn't exist OR it's private
+// and the token lacks access (GitHub deliberately returns the same signal for
+// both). These are user-fixable (grant access), not upstream outages.
+func repoInaccessible(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "Could not resolve to a Repository") ||
+		strings.Contains(s, "empty data")
 }

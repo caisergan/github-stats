@@ -1,0 +1,2 @@
+ALTER TABLE repos ADD COLUMN primary_language TEXT NOT NULL DEFAULT '';
+ALTER TABLE repos ADD COLUMN language_color TEXT NOT NULL DEFAULT '';

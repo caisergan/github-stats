@@ -60,6 +60,32 @@ func TestSavePATValidatesAndStores(t *testing.T) {
 	}
 }
 
+func TestSavePATRejectsTokenWithoutRepoScope(t *testing.T) {
+	// A classic token that authenticates fine but advertises no "repo" scope.
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-OAuth-Scopes", "read:user, public_repo")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":1,"login":"octocat"}`))
+	}))
+	defer gh.Close()
+	srv, st := testServerWithGitHub(t, gh.URL)
+	uid, sid := loginSession(t, st, "neo", 7)
+
+	body, _ := json.Marshal(map[string]string{"token": "weak_pat"})
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/pat", bytes.NewReader(body))
+	req.AddCookie(&http.Cookie{Name: "gs_session", Value: sid})
+	withCSRF(req)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body %s)", rec.Code, rec.Body.String())
+	}
+	// Nothing should have been stored.
+	if _, err := st.GetCredential(context.Background(), uid, "pat"); err != store.ErrNotFound {
+		t.Fatalf("a scope-deficient PAT was stored: %v", err)
+	}
+}
+
 func TestSavePATRejectsInvalid(t *testing.T) {
 	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

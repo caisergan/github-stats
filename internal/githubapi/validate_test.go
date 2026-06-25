@@ -40,3 +40,23 @@ func TestValidatePATRejectsBadToken(t *testing.T) {
 		t.Fatal("expected error for 401 token")
 	}
 }
+
+func TestHasRepoScope(t *testing.T) {
+	cases := []struct {
+		scopes string
+		want   bool
+	}{
+		{"repo, read:org, gist", true},
+		{"read:org,repo", true},
+		{"repo", true},
+		{"read:user, public_repo", false}, // public_repo is NOT repo
+		{"public_repo", false},
+		{"read:user", false},
+		{"", false}, // fine-grained token: unknown, treated as "can't confirm"
+	}
+	for _, c := range cases {
+		if got := HasRepoScope(c.scopes); got != c.want {
+			t.Errorf("HasRepoScope(%q) = %v, want %v", c.scopes, got, c.want)
+		}
+	}
+}

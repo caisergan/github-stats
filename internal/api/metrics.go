@@ -66,6 +66,8 @@ type overviewJSON struct {
 	Description   string  `json:"description"`
 	Stargazers    int64   `json:"stargazers"`
 	Forks         int64   `json:"forks"`
+	Language      string  `json:"language"`
+	LanguageColor string  `json:"language_color"`
 	OpenIssues    int64   `json:"open_issues"`
 	OpenPRs       int64   `json:"open_prs"`
 	Contributors  int64   `json:"contributors"`
@@ -158,6 +160,8 @@ func (s *Server) buildOverview(ctx context.Context, repo *store.Repo, repoID int
 		Description:   repo.Description,
 		Stargazers:    repo.Stargazers,
 		Forks:         repo.Forks,
+		Language:      repo.PrimaryLanguage,
+		LanguageColor: repo.LanguageColor,
 		OpenIssues:    openIssues,
 		OpenPRs:       openPRs,
 		Contributors:  contributors,

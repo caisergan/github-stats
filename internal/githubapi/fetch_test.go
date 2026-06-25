@@ -36,6 +36,7 @@ func TestFetchRepoMeta(t *testing.T) {
 			"databaseId": 123, "nameWithOwner":"octocat/hello", "isPrivate":true,
 			"description":"hi", "stargazerCount":7, "forkCount":2,
 			"defaultBranchRef":{"name":"main"},
+			"primaryLanguage":{"name":"Go","color":"#00ADD8"},
 			"rateLimit":{"cost":1,"remaining":4999,"resetAt":"2026-04-01T13:00:00Z"}
 		}}}`,
 	}))
@@ -49,6 +50,9 @@ func TestFetchRepoMeta(t *testing.T) {
 	if r.GitHubID != 123 || r.FullName != "octocat/hello" || !r.IsPrivate ||
 		r.DefaultBranch != "main" || r.Stargazers != 7 || r.Forks != 2 {
 		t.Fatalf("repo meta = %+v", r)
+	}
+	if r.PrimaryLanguage != "Go" || r.LanguageColor != "#00ADD8" {
+		t.Fatalf("language = %q/%q, want Go/#00ADD8", r.PrimaryLanguage, r.LanguageColor)
 	}
 }
 

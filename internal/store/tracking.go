@@ -41,7 +41,7 @@ func (s *Store) IsTracked(ctx context.Context, userID, repoID int64) (bool, erro
 func (s *Store) ListTrackedRepos(ctx context.Context, userID int64) ([]Repo, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT r.id, r.github_id, r.full_name, r.is_private, r.default_branch,
-			r.description, r.stargazers, r.forks, r.created_at
+			r.description, r.stargazers, r.forks, r.primary_language, r.language_color, r.created_at
 		FROM repo_tracking t
 		JOIN repos r ON r.id = t.repo_id
 		WHERE t.user_id = ?
@@ -55,7 +55,7 @@ func (s *Store) ListTrackedRepos(ctx context.Context, userID int64) ([]Repo, err
 		var r Repo
 		var priv int
 		if err := rows.Scan(&r.ID, &r.GitHubID, &r.FullName, &priv, &r.DefaultBranch,
-			&r.Description, &r.Stargazers, &r.Forks, &r.CreatedAt); err != nil {
+			&r.Description, &r.Stargazers, &r.Forks, &r.PrimaryLanguage, &r.LanguageColor, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		r.IsPrivate = priv != 0

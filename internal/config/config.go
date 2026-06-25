@@ -43,7 +43,7 @@ func Load(getenv func(string) string) (Config, error) {
 		BaseURL:            get(getenv, "BASE_URL", "http://localhost:8080"),
 		GitHubClientID:     getenv("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: getenv("GITHUB_CLIENT_SECRET"),
-		GitHubScopes:       get(getenv, "GITHUB_SCOPES", "read:user public_repo"),
+		GitHubScopes:       get(getenv, "GITHUB_SCOPES", "read:user repo"),
 		SessionTTL:         30 * 24 * time.Hour,
 		GitHubOAuthBaseURL: get(getenv, "GITHUB_OAUTH_BASE_URL", "https://github.com"),
 		GitHubAPIBaseURL:   get(getenv, "GITHUB_API_BASE_URL", "https://api.github.com"),

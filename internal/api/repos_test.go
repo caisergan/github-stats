@@ -68,7 +68,8 @@ func TestAddRepoFetchesTracksAndEnqueues(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"data":{"repository":{"databaseId":777,"nameWithOwner":"octocat/hello",
 			"isPrivate":true,"description":"hi","stargazerCount":3,"forkCount":1,
-			"defaultBranchRef":{"name":"main"}},
+			"defaultBranchRef":{"name":"main"},
+			"primaryLanguage":{"name":"Go","color":"#00ADD8"}},
 			"rateLimit":{"cost":1,"remaining":4999,"resetAt":"2026-06-01T13:00:00Z"}}}`))
 	}))
 	defer gh.Close()
@@ -90,6 +91,9 @@ func TestAddRepoFetchesTracksAndEnqueues(t *testing.T) {
 	if got["full_name"] != "octocat/hello" || got["is_private"] != true || got["default_branch"] != "main" {
 		t.Fatalf("repo json = %v", got)
 	}
+	if got["language"] != "Go" || got["language_color"] != "#00ADD8" {
+		t.Fatalf("language json = %v / %v, want Go / #00ADD8", got["language"], got["language_color"])
+	}
 
 	// Repo upserted, tracked, and a backfill job enqueued.
 	ctx := context.Background()
@@ -103,6 +107,33 @@ func TestAddRepoFetchesTracksAndEnqueues(t *testing.T) {
 	jobs, _ := st.ListJobsForRepo(ctx, r.ID)
 	if len(jobs) != 1 || jobs[0].Kind != "backfill" {
 		t.Fatalf("expected 1 backfill job, got %+v", jobs)
+	}
+}
+
+func TestAddRepoInaccessibleRepoReturns404(t *testing.T) {
+	// GitHub returns a "could not resolve" GraphQL error for a private repo the
+	// token can't see (and for nonexistent repos). The handler should translate
+	// that into an actionable 404, not a generic 502.
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"errors":[{"message":"Could not resolve to a Repository with the name 'caisergan/trade-station'."}]}`))
+	}))
+	defer gh.Close()
+
+	srv, _, cookie := serverWithGitHub(t, gh.URL)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/repos",
+		strings.NewReader(`{"full_name":"caisergan/trade-station"}`))
+	req.AddCookie(cookie)
+	withCSRF(req)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "repo") {
+		t.Fatalf("expected an actionable message mentioning the repo scope, got: %s", rec.Body.String())
 	}
 }
 

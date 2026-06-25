@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { I } from "./Icons";
 import { Segmented, Switch } from "./UI";
+import { RepoAccessError } from "../api";
 
 interface KpiProps {
   icon?: React.ComponentType<any>;
@@ -77,7 +78,13 @@ interface AddRepoFormProps {
 export function AddRepoForm({ onAdd }: AddRepoFormProps) {
   const [val, setVal] = useState("");
   const [err, setErr] = useState("");
+  const [needsAccess, setNeedsAccess] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const clearError = () => {
+    setErr("");
+    setNeedsAccess(false);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,13 +93,14 @@ export function AddRepoForm({ onAdd }: AddRepoFormProps) {
       setErr("Use the owner/name format, e.g. facebook/react");
       return;
     }
-    setErr("");
+    clearError();
     setBusy(true);
     try {
       await onAdd(v);
       setVal("");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to track repository.");
+      setNeedsAccess(e instanceof RepoAccessError);
     } finally {
       setBusy(false);
     }
@@ -110,7 +118,7 @@ export function AddRepoForm({ onAdd }: AddRepoFormProps) {
             disabled={busy}
             onChange={(e) => {
               setVal(e.target.value);
-              setErr("");
+              clearError();
             }}
             aria-label="Add repository"
           />
@@ -129,6 +137,14 @@ export function AddRepoForm({ onAdd }: AddRepoFormProps) {
       {err && (
         <div style={{ color: "var(--red)", fontSize: 12.5, marginTop: 7 }}>
           {err}
+          {needsAccess && (
+            <div style={{ marginTop: 6, color: "var(--muted)" }}>
+              Grant access:{" "}
+              <a href="/auth/github">Reconnect GitHub</a>
+              {" · "}
+              <a href="/settings">Add a token in Settings</a>
+            </div>
+          )}
         </div>
       )}
     </form>

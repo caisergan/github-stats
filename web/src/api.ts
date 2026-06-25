@@ -11,6 +11,18 @@ async function getJSON<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * Thrown when the server reports a repository the current token can't reach
+ * (missing, or private without access). The UI uses this to offer a path to
+ * grant access (reconnect GitHub / add a PAT) rather than just showing text.
+ */
+export class RepoAccessError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RepoAccessError";
+  }
+}
+
 async function asError(res: Response, url: string): Promise<Error> {
   let detail = "";
   try {
@@ -77,6 +89,8 @@ export interface Repo {
   description?: string;
   stargazers?: number;
   forks?: number;
+  language?: string;
+  language_color?: string;
   sync_status: SyncStatus;
   last_synced_at: string | null;
 }
@@ -92,7 +106,13 @@ export async function addRepo(fullName: string): Promise<Repo> {
     headers: await csrfHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ full_name: fullName }),
   });
-  if (!res.ok) throw await asError(res, "/api/repos");
+  if (!res.ok) {
+    const err = await asError(res, "/api/repos");
+    // 404 from this endpoint means "repo not found or not accessible to your
+    // token" — surface it as an access error so the form can offer a fix.
+    if (res.status === 404) throw new RepoAccessError(err.message);
+    throw err;
+  }
   return (await res.json()) as Repo;
 }
 
@@ -182,6 +202,8 @@ export interface Overview {
   description: string;
   stargazers: number;
   forks: number;
+  language?: string;
+  language_color?: string;
   open_issues: number;
   open_prs: number;
   contributors: number;

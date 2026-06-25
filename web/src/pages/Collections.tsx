@@ -206,19 +206,33 @@ export default function Collections({
   const [selected, setSelected] = useState<Collection | null>(null);
   const [modal, setModal] = useState(false);
 
-  // Fetch overviews for the selected collection's members (drives RepoCard).
+  // Fetch overviews + commit sparklines for the selected collection's members
+  // (both drive RepoCard).
   const memberIds = selected
     ? repos.filter((r) => selected.repo_ids.includes(r.id)).map((r) => r.id)
     : [];
   const memberKey = memberIds.join(",");
-  const ovState = useAsync<Record<number, OverviewT>>(async () => {
-    if (memberIds.length === 0) return {};
-    const list = await Promise.all(
-      memberIds.map((id) => fetchOverview(id, { window: "90d", excludeBots: false })),
+  const ovState = useAsync<{
+    overviews: Record<number, OverviewT>;
+    sparks: Record<number, SeriesPoint[]>;
+  }>(async () => {
+    if (memberIds.length === 0) return { overviews: {}, sparks: {} };
+    const rows = await Promise.all(
+      memberIds.map(async (id) => {
+        const [ov, m] = await Promise.all([
+          fetchOverview(id, { window: "90d", excludeBots: false }),
+          fetchMetrics(id, { window: "90d", excludeBots: false, keys: ["commit_rate"] }),
+        ]);
+        return { id, ov, series: seriesOf(m, "commit_rate") };
+      }),
     );
-    return Object.fromEntries(list.map((o) => [o.id, o]));
+    return {
+      overviews: Object.fromEntries(rows.map((x) => [x.id, x.ov])),
+      sparks: Object.fromEntries(rows.map((x) => [x.id, x.series])),
+    };
   }, [memberKey]);
-  const overviews = ovState.data ?? {};
+  const overviews = ovState.data?.overviews ?? {};
+  const sparks = ovState.data?.sparks ?? {};
 
   if (selected) {
     const members = repos.filter((r) => selected.repo_ids.includes(r.id));
@@ -267,7 +281,7 @@ export default function Collections({
         ) : (
           <div className="repo-grid" style={{ marginTop: 8 }}>
             {members.map((r) => (
-              <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} />
+              <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} series={sparks[r.id]} />
             ))}
           </div>
         )}

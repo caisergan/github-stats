@@ -40,6 +40,9 @@ beforeEach(() => {
     window_from: "2026-01-01",
     window_to: "2026-03-31",
   });
+  vi.spyOn(api, "fetchMetrics").mockResolvedValue({
+    commit_rate: { kind: "time_series", series: [] },
+  } as api.MetricsMap);
   vi.spyOn(api, "listCollections").mockResolvedValue([]);
 });
 
@@ -87,6 +90,31 @@ describe("Overview page", () => {
 
     await waitFor(() =>
       expect(screen.getByText(/fetch repo failed/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("offers a grant-access path when onAdd fails with a RepoAccessError", async () => {
+    const onAdd = vi
+      .fn()
+      .mockRejectedValue(new api.RepoAccessError("Couldn't access caisergan/trade-station."));
+    renderPage(REPOS, onAdd);
+
+    await userEvent.type(
+      screen.getByPlaceholderText("owner/name"),
+      "caisergan/trade-station",
+    );
+    await userEvent.click(screen.getByRole("button", { name: /track repo/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/couldn't access/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("link", { name: /reconnect github/i })).toHaveAttribute(
+      "href",
+      "/auth/github",
+    );
+    expect(screen.getByRole("link", { name: /settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
     );
   });
 });

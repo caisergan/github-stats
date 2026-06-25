@@ -28,6 +28,7 @@ func TestUpsertRepoInsertsThenUpdates(t *testing.T) {
 	id, err := s.UpsertRepo(ctx, &Repo{
 		GitHubID: 100, FullName: "octocat/hello", IsPrivate: true,
 		DefaultBranch: "main", Description: "first", Stargazers: 3, Forks: 1,
+		PrimaryLanguage: "Rust", LanguageColor: "#dea584",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -39,6 +40,7 @@ func TestUpsertRepoInsertsThenUpdates(t *testing.T) {
 	id2, err := s.UpsertRepo(ctx, &Repo{
 		GitHubID: 100, FullName: "octocat/hello", IsPrivate: false,
 		DefaultBranch: "trunk", Description: "second", Stargazers: 9, Forks: 4,
+		PrimaryLanguage: "Go", LanguageColor: "#00ADD8",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -53,6 +55,9 @@ func TestUpsertRepoInsertsThenUpdates(t *testing.T) {
 	}
 	if r.DefaultBranch != "trunk" || r.Description != "second" || r.Stargazers != 9 || r.IsPrivate {
 		t.Fatalf("update not applied: %+v", r)
+	}
+	if r.PrimaryLanguage != "Go" || r.LanguageColor != "#00ADD8" {
+		t.Fatalf("language not applied: %+v", r)
 	}
 }
 

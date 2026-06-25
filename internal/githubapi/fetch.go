@@ -45,6 +45,7 @@ query($owner:String!, $name:String!) {
     stargazerCount
     forkCount
     defaultBranchRef { name }
+    primaryLanguage { name color }
   }
   rateLimit { cost remaining resetAt }
 }`
@@ -63,6 +64,10 @@ func (c *Client) FetchRepoMeta(ctx context.Context, owner, name string) (*store.
 			DefaultBranch  struct {
 				Name string `json:"name"`
 			} `json:"defaultBranchRef"`
+			PrimaryLanguage struct {
+				Name  string `json:"name"`
+				Color string `json:"color"`
+			} `json:"primaryLanguage"`
 		} `json:"repository"`
 		RateLimit RateLimit `json:"rateLimit"`
 	}
@@ -71,13 +76,15 @@ func (c *Client) FetchRepoMeta(ctx context.Context, owner, name string) (*store.
 		return nil, err
 	}
 	r := &store.Repo{
-		GitHubID:      data.Repository.DatabaseID,
-		FullName:      data.Repository.NameWithOwner,
-		IsPrivate:     data.Repository.IsPrivate,
-		DefaultBranch: data.Repository.DefaultBranch.Name,
-		Description:   data.Repository.Description,
-		Stargazers:    data.Repository.StargazerCount,
-		Forks:         data.Repository.ForkCount,
+		GitHubID:        data.Repository.DatabaseID,
+		FullName:        data.Repository.NameWithOwner,
+		IsPrivate:       data.Repository.IsPrivate,
+		DefaultBranch:   data.Repository.DefaultBranch.Name,
+		Description:     data.Repository.Description,
+		Stargazers:      data.Repository.StargazerCount,
+		Forks:           data.Repository.ForkCount,
+		PrimaryLanguage: data.Repository.PrimaryLanguage.Name,
+		LanguageColor:   data.Repository.PrimaryLanguage.Color,
 	}
 	return r, nil
 }

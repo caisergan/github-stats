@@ -10,12 +10,20 @@ import { useAsync } from "../hooks/useAsync";
 import {
   fetchRateLimit,
   fetchOverview,
+  fetchMetrics,
   exportCollectionURL,
   type RateLimit,
   type Repo,
   type Overview as OverviewT,
+  type MetricsMap,
+  type SeriesPoint,
 } from "../api";
 import * as F from "../format";
+
+function seriesOf(m: MetricsMap, key: string): SeriesPoint[] {
+  const r = m[key];
+  return r && r.kind === "time_series" ? r.series : [];
+}
 
 interface OverviewProps {
   repos: Repo[];
@@ -35,16 +43,30 @@ export default function Overview({ repos, onAdd }: OverviewProps) {
     void fetchRateLimit().then(setRate).catch(() => setRate(null));
   }, []);
 
-  // Per-repo headline counts come from the overview endpoint (the repo list
-  // itself carries no commit_rate/open_issues/etc). Fan out one fetch per repo.
+  // Per-repo headline counts come from the overview endpoint, and the card
+  // sparkline from the commit_rate series. The repo list itself carries neither,
+  // so fan out both fetches per repo.
   const ids = repos.map((r) => r.id).join(",");
-  const ovState = useAsync<Record<number, OverviewT>>(async () => {
-    const list = await Promise.all(
-      repos.map((r) => fetchOverview(r.id, { window: "90d", excludeBots: false })),
+  const ovState = useAsync<{
+    overviews: Record<number, OverviewT>;
+    sparks: Record<number, SeriesPoint[]>;
+  }>(async () => {
+    const rows = await Promise.all(
+      repos.map(async (r) => {
+        const [ov, m] = await Promise.all([
+          fetchOverview(r.id, { window: "90d", excludeBots: false }),
+          fetchMetrics(r.id, { window: "90d", excludeBots: false, keys: ["commit_rate"] }),
+        ]);
+        return { id: r.id, ov, series: seriesOf(m, "commit_rate") };
+      }),
     );
-    return Object.fromEntries(list.map((o) => [o.id, o]));
+    return {
+      overviews: Object.fromEntries(rows.map((x) => [x.id, x.ov])),
+      sparks: Object.fromEntries(rows.map((x) => [x.id, x.series])),
+    };
   }, [ids]);
-  const overviews = ovState.data ?? {};
+  const overviews = ovState.data?.overviews ?? {};
+  const sparks = ovState.data?.sparks ?? {};
 
   const filtered = useMemo(() => {
     let list = repos.filter(
@@ -200,7 +222,7 @@ export default function Overview({ repos, onAdd }: OverviewProps) {
               ) : (
                 <div className="repo-grid">
                   {members.map((r) => (
-                    <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} />
+                    <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} series={sparks[r.id]} />
                   ))}
                 </div>
               )}
@@ -211,7 +233,7 @@ export default function Overview({ repos, onAdd }: OverviewProps) {
             <h2>Uncollected</h2>
             <div className="repo-grid">
               {collectionGroups.uncollected.map((r) => (
-                <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} />
+                <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} series={sparks[r.id]} />
               ))}
             </div>
           </section>
@@ -219,7 +241,7 @@ export default function Overview({ repos, onAdd }: OverviewProps) {
       ) : (
         <div className="repo-grid">
           {filtered.map((r) => (
-            <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} />
+            <RepoCard key={r.id} repo={r} overview={overviews[r.id] ?? null} series={sparks[r.id]} />
           ))}
         </div>
       )}

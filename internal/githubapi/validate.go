@@ -44,3 +44,17 @@ func ValidatePAT(ctx context.Context, hc *http.Client, restBaseURL, token string
 	}
 	return &PATInfo{Login: body.Login, Scopes: resp.Header.Get("X-OAuth-Scopes")}, nil
 }
+
+// HasRepoScope reports whether a classic token's X-OAuth-Scopes string grants the
+// "repo" scope — the scope required to read PRIVATE repositories. The match is on
+// the exact scope token (so "public_repo" does NOT count). Fine-grained tokens
+// report an empty scope string; callers should treat "" as "unknown, can't tell"
+// rather than "missing", since their access is per-repo and not in this header.
+func HasRepoScope(scopes string) bool {
+	for _, s := range strings.Split(scopes, ",") {
+		if strings.TrimSpace(s) == "repo" {
+			return true
+		}
+	}
+	return false
+}

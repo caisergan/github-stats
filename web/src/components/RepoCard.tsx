@@ -1,17 +1,22 @@
 import { Link } from "react-router-dom";
-import type { Repo, Overview } from "../api";
+import type { Repo, Overview, SeriesPoint } from "../api";
 import { I } from "./Icons";
-import { SyncStatusBadge } from "./UI";
+import { SyncStatusBadge, LangDot } from "./UI";
+import { Sparkline } from "./Charts";
 import { fmtNullableTs, fmtNumber, splitRepo } from "../format";
 
 interface Props {
   repo: Repo;
   overview: Overview | null;
+  series?: SeriesPoint[];
 }
 
-export default function RepoCard({ repo, overview }: Props) {
+export default function RepoCard({ repo, overview, series }: Props) {
   const { owner, name } = splitRepo(repo.full_name);
-  const stat = (n: number | undefined) => (overview ? fmtNumber(n ?? 0) : "—");
+  const stars = overview?.stargazers ?? repo.stargazers ?? 0;
+  const forks = overview?.forks ?? repo.forks ?? 0;
+  const lang = overview?.language || repo.language || "";
+  const langColor = overview?.language_color || repo.language_color || "var(--muted)";
 
   return (
     <Link
@@ -31,9 +36,7 @@ export default function RepoCard({ repo, overview }: Props) {
             {name}
           </span>
         </div>
-        <span className={"badge" + (repo.is_private ? " amber" : "")}>
-          {repo.is_private ? "Private" : "Public"}
-        </span>
+        <SyncStatusBadge status={repo.sync_status} />
       </div>
 
       <div className="rc-desc">
@@ -41,23 +44,31 @@ export default function RepoCard({ repo, overview }: Props) {
           (repo.is_private ? "Private repository" : "No description provided.")}
       </div>
 
+      <div className="rc-spark">
+        <Sparkline series={series ?? []} />
+      </div>
+
       <div className="rc-stats">
         <span className="rc-stat">
-          <I.issue style={{ width: 14, height: 14 }} />
-          <b>{stat(overview?.open_issues)}</b> issues
+          <I.star style={{ width: 14, height: 14 }} />
+          <b>{fmtNumber(stars)}</b>
+        </span>
+        <span className="rc-stat">
+          <I.fork style={{ width: 14, height: 14 }} />
+          <b>{fmtNumber(forks)}</b>
         </span>
         <span className="rc-stat">
           <I.pr style={{ width: 14, height: 14 }} />
-          <b>{stat(overview?.open_prs)}</b> PRs
+          <b>{overview ? fmtNumber(overview.open_prs) : "—"}</b>
         </span>
         <span className="rc-stat">
-          <I.users style={{ width: 14, height: 14 }} />
-          <b>{stat(overview?.contributors)}</b> authors
+          <I.issue style={{ width: 14, height: 14 }} />
+          <b>{overview ? fmtNumber(overview.open_issues) : "—"}</b>
         </span>
       </div>
 
       <div className="rc-foot">
-        <SyncStatusBadge status={repo.sync_status} />
+        {lang ? <LangDot name={lang} color={langColor} /> : <span />}
         <span className="synced">synced {fmtNullableTs(repo.last_synced_at)}</span>
       </div>
     </Link>

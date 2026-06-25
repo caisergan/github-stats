@@ -20,6 +20,17 @@
         }
       })();
     </script>
+    <style>
+      /* Critical, render-blocking-free background so the FIRST frame is already
+         themed — before the main stylesheet applies (in dev it's JS-injected, so
+         there's a gap where var(--bg) is undefined and the page would flash
+         white). Hardcoded to the --bg tokens (zinc-950 / zinc-50) and keyed off
+         data-theme so a runtime theme toggle stays correct. Keep in sync with
+         the --bg values in src/styles.css. */
+      html { background: #fafafa; }
+      html[data-theme="dark"] { background: #09090b; color-scheme: dark; }
+      html[data-theme="light"] { background: #fafafa; color-scheme: light; }
+    </style>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>GitHub Stats — Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />

@@ -1,5 +1,11 @@
-import { GitCommit, GitPullRequest, AlertCircle } from "lucide-react";
-import type { LatestItem, LatestCommit, LatestPR, LatestIssue, LatestKind } from "../api";
+import { I } from "./Icons";
+import type {
+  LatestItem,
+  LatestCommit,
+  LatestPR,
+  LatestIssue,
+  LatestKind,
+} from "../api";
 import { fmtRelative } from "../format";
 
 interface Props {
@@ -10,80 +16,90 @@ interface Props {
 function isCommit(i: LatestItem): i is LatestCommit {
   return (i as LatestCommit).sha !== undefined;
 }
-function isPR(i: LatestItem, kind: LatestKind): i is LatestPR {
-  return kind === "prs";
-}
 
 export default function LatestList({ kind, items }: Props) {
   if (items.length === 0) {
-    return <p className="text-xs text-muted italic py-3">Nothing yet.</p>;
+    return <div className="empty">Nothing yet.</div>;
   }
 
   return (
-    <div className="space-y-1">
-      {items.map((item) => {
+    <div className="latest">
+      {items.map((item, i) => {
         if (isCommit(item)) {
           return (
-            <div className="flex items-center gap-3 p-2 hover:bg-surface-hover/20 rounded-lg border border-transparent hover:border-border/30 transition-all duration-200" key={item.sha}>
-              <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0">
-                <GitCommit size={15} />
+            <div className="item" key={item.sha || i}>
+              <span className="ic green">
+                <I.commit style={{ width: 14, height: 14 }} />
+              </span>
+              <div className="body">
+                <div className="ttl">{item.msg_first_line}</div>
+                <div className="sub">
+                  <span className="sha">{item.sha.slice(0, 7)}</span>
+                  <span>·</span>
+                  <span>
+                    {item.author_login}
+                    {item.is_bot && " 🤖"}
+                  </span>
+                  <span>·</span>
+                  <span>{fmtRelative(item.committed_at)}</span>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-text truncate">{item.msg_first_line}</p>
-                <p className="text-[10px] text-muted truncate">
-                  by <span className="font-semibold text-text">{item.author_login}</span> · {fmtRelative(item.committed_at)}
-                </p>
-              </div>
+              <span className="churn">
+                <span className="add">+{item.additions}</span>{" "}
+                <span className="del">−{item.deletions}</span>
+              </span>
             </div>
           );
         }
-        if (isPR(item, kind)) {
+
+        if (kind === "prs") {
           const pr = item as LatestPR;
-          const isMerged = pr.merged_at !== null;
-          const isClosed = pr.closed_at !== null;
-          const statusColor = isMerged
-            ? "text-purple-400 bg-purple-500/10 border-purple-500/20"
-            : isClosed
-              ? "text-red bg-red/10 border-red/20"
-              : "text-green bg-green/10 border-green/20";
-
+          const tone =
+            pr.merged_at !== null ? "purple" : pr.closed_at !== null ? "red" : "green";
           return (
-            <div className="flex items-center gap-3 p-2 hover:bg-surface-hover/20 rounded-lg border border-transparent hover:border-border/30 transition-all duration-200" key={`pr-${pr.number}`}>
-              <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 ${statusColor}`}>
-                <GitPullRequest size={15} />
+            <div className="item" key={"pr" + (pr.number || i)}>
+              <span className={"ic " + tone}>
+                <I.pr style={{ width: 14, height: 14 }} />
+              </span>
+              <div className="body">
+                <div className="ttl">{pr.title}</div>
+                <div className="sub">
+                  <span>#{pr.number}</span>
+                  <span>·</span>
+                  <span>{pr.author_login}</span>
+                  <span>·</span>
+                  <span>{fmtRelative(pr.created_at)}</span>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-text truncate">
-                  <span className="text-muted mr-1.5">#{pr.number}</span>
-                  {pr.title}
-                </p>
-                <p className="text-[10px] text-muted truncate">
-                  by <span className="font-semibold text-text">{pr.author_login}</span> · {fmtRelative(pr.created_at)}
-                </p>
-              </div>
+              <span className="row" style={{ gap: 4, color: "var(--muted)", fontSize: 12 }}>
+                <I.comment style={{ width: 13, height: 13 }} />
+                {pr.comments_count}
+              </span>
             </div>
           );
         }
-        const iss = item as LatestIssue;
-        const isClosed = iss.closed_at !== null;
-        const statusColor = isClosed
-          ? "text-purple-400 bg-purple-500/10 border-purple-500/20"
-          : "text-red bg-red/10 border-red/20";
 
+        const iss = item as LatestIssue;
+        const tone = iss.closed_at !== null ? "purple" : "green";
         return (
-          <div className="flex items-center gap-3 p-2 hover:bg-surface-hover/20 rounded-lg border border-transparent hover:border-border/30 transition-all duration-200" key={`iss-${iss.number}`}>
-            <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 ${statusColor}`}>
-              <AlertCircle size={15} />
+          <div className="item" key={"is" + (iss.number || i)}>
+            <span className={"ic " + tone}>
+              <I.issue style={{ width: 14, height: 14 }} />
+            </span>
+            <div className="body">
+              <div className="ttl">{iss.title}</div>
+              <div className="sub">
+                <span>#{iss.number}</span>
+                <span>·</span>
+                <span>{iss.author_login}</span>
+                <span>·</span>
+                <span>opened {fmtRelative(iss.created_at)}</span>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-text truncate">
-                <span className="text-muted mr-1.5">#{iss.number}</span>
-                {iss.title}
-              </p>
-              <p className="text-[10px] text-muted truncate">
-                by <span className="font-semibold text-text">{iss.author_login}</span> · {fmtRelative(iss.created_at)}
-              </p>
-            </div>
+            <span className="row" style={{ gap: 4, color: "var(--muted)", fontSize: 12 }}>
+              <I.comment style={{ width: 13, height: 13 }} />
+              {iss.comments_count}
+            </span>
           </div>
         );
       })}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw, Terminal, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { I } from "./Icons";
 import { refreshRepo, openSyncStream, type SyncEvent, type SyncStreamHandle } from "../api";
 
 interface Props {
@@ -9,6 +9,7 @@ interface Props {
 
 interface LogLine {
   id: number;
+  phase: string;
   text: string;
   tone: "" | "error" | "done";
 }
@@ -23,43 +24,43 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
   // Close any open stream on unmount.
   useEffect(() => () => handleRef.current?.close(), []);
 
-  // Auto-scroll to bottom of log when lines update
+  // Auto-scroll the log to the bottom as lines arrive.
   useEffect(() => {
     if (typeof logEndRef.current?.scrollIntoView === "function") {
       logEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [lines]);
 
-  function push(text: string, tone: LogLine["tone"]) {
+  function push(text: string, tone: LogLine["tone"], phase: string) {
     seq.current += 1;
     const id = seq.current;
-    setLines((prev) => [...prev.slice(-49), { id, text, tone }]);
+    setLines((prev) => [...prev.slice(-49), { id, phase, text, tone }]);
   }
 
   async function start() {
     if (running) return;
     setRunning(true);
     setLines([]);
-    push("initializing repository synchronization...", "");
+    push("initializing repository synchronization…", "", "init");
     try {
       await refreshRepo(repoID);
     } catch (e) {
-      push(e instanceof Error ? e.message : "refresh failed", "error");
+      push(e instanceof Error ? e.message : "refresh failed", "error", "error");
       setRunning(false);
       return;
     }
     handleRef.current = openSyncStream(repoID, {
       onEvent: (ev: SyncEvent) => {
-        push(ev.message || ev.phase, ev.phase === "error" ? "error" : "");
+        push(ev.message || ev.phase, ev.phase === "error" ? "error" : "", ev.phase);
       },
       onDone: (ev: SyncEvent) => {
-        push(ev.message || "done", ev.phase === "error" ? "error" : "done");
+        push(ev.message || "done", ev.phase === "error" ? "error" : "done", ev.phase || "done");
         setRunning(false);
         handleRef.current = null;
         onComplete();
       },
       onError: () => {
-        push("stream interrupted prematurely", "error");
+        push("stream interrupted prematurely", "error", "error");
         setRunning(false);
         handleRef.current = null;
       },
@@ -67,59 +68,26 @@ export default function RefreshButton({ repoID, onComplete }: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <button
-        onClick={start}
-        disabled={running}
-        className="flex items-center justify-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white text-xs font-bold uppercase tracking-wider rounded-lg shadow-[0_0_15px_rgba(47,129,247,0.15)] hover:shadow-[0_0_20px_rgba(47,129,247,0.3)] transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed"
-      >
-        <RefreshCw size={14} className={running ? "animate-spin" : ""} />
-        <span>{running ? "Syncing…" : "Refresh Now"}</span>
+    <div style={{ width: running || lines.length ? "100%" : "auto" }}>
+      <button className="btn primary" onClick={start} disabled={running}>
+        <I.refresh
+          style={
+            running
+              ? { animation: "spin 1s linear infinite", width: 15, height: 15 }
+              : { width: 15, height: 15 }
+          }
+        />
+        {running ? "Refreshing…" : "Refresh now"}
       </button>
-
       {lines.length > 0 && (
-        <div className="custom-glass rounded-xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.4)] border border-border/60">
-          {/* Terminal Console Header */}
-          <div className="bg-surface/90 px-4 py-2 border-b border-border/40 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-bold text-muted uppercase tracking-wider">
-              <Terminal size={12} className="text-accent" />
-              <span>Sync Stream Logs</span>
+        <div className="progress-log">
+          {lines.map((l) => (
+            <div key={l.id} className={"ln " + l.tone}>
+              <span className="ph">{l.phase}</span>
+              <span>{l.text}</span>
             </div>
-            <div className="flex gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-red/30" />
-              <div className="w-2.5 h-2.5 rounded-full bg-amber/30" />
-              <div className="w-2.5 h-2.5 rounded-full bg-green/30" />
-            </div>
-          </div>
-
-          {/* Console Body */}
-          <div className="p-4 bg-black/90 font-mono text-[11px] leading-relaxed max-h-40 overflow-y-auto space-y-1">
-            {lines.map((l) => {
-              if (l.tone === "error") {
-                return (
-                  <div key={l.id} className="flex items-start gap-1.5 text-red/90">
-                    <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-                    <span>[ERR] {l.text}</span>
-                  </div>
-                );
-              }
-              if (l.tone === "done") {
-                return (
-                  <div key={l.id} className="flex items-start gap-1.5 text-green-400">
-                    <CheckCircle2 size={12} className="shrink-0 mt-0.5 animate-bounce" />
-                    <span>[OK] {l.text}</span>
-                  </div>
-                );
-              }
-              return (
-                <div key={l.id} className="text-muted/90 flex items-start gap-1.5 pl-4">
-                  <span>&gt;</span>
-                  <span>{l.text}</span>
-                </div>
-              );
-            })}
-            <div ref={logEndRef} />
-          </div>
+          ))}
+          <div ref={logEndRef} />
         </div>
       )}
     </div>

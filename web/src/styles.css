@@ -519,6 +519,25 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
 }
 .file-drop.dragging { border-color: var(--accent); color: var(--fg); }
 
+/* Menu items rendered as <a>/<button> (Settings link, Sign out, profile) keep
+   visual parity with the original <div className="mi"> items. */
+.menu a.mi,
+.menu button.mi {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  text-decoration: none;
+}
+
+/* Inline form/import error text. */
+.form-error {
+  color: var(--red, #dc2626);
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+
 /* Settings + PAT honesty note */
 .settings-section { margin: 24px 0; max-width: 640px; }
 .note {

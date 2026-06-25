@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { I } from "./Icons";
 import { Segmented, Switch } from "./UI";
-import { RepoAccessError } from "../api";
+import { RepoAccessError, fetchMyRepos, type GitHubRepo } from "../api";
 
 interface KpiProps {
   icon?: React.ComponentType<any>;
@@ -81,20 +81,48 @@ export function AddRepoForm({ onAdd }: AddRepoFormProps) {
   const [needsAccess, setNeedsAccess] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Repo picker: the signed-in user's own GitHub repos, loaded on first focus.
+  const [open, setOpen] = useState(false);
+  const [repos, setRepos] = useState<GitHubRepo[] | null>(null);
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const wrapRef = useRef<HTMLFormElement | null>(null);
+
   const clearError = () => {
     setErr("");
     setNeedsAccess(false);
   };
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const v = val.trim();
+  // Dismiss the suggestions on an outside click.
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const ensureRepos = async () => {
+    if (repos !== null || loadingRepos) return;
+    setLoadingRepos(true);
+    try {
+      setRepos(await fetchMyRepos());
+    } catch {
+      setRepos([]); // fail quietly — manual owner/name typing still works
+    } finally {
+      setLoadingRepos(false);
+    }
+  };
+
+  const trackName = async (name: string) => {
+    const v = name.trim();
     if (!/^[\w.-]+\/[\w.-]+$/.test(v)) {
       setErr("Use the owner/name format, e.g. facebook/react");
       return;
     }
     clearError();
     setBusy(true);
+    setOpen(false);
     try {
       await onAdd(v);
       setVal("");
@@ -106,22 +134,82 @@ export function AddRepoForm({ onAdd }: AddRepoFormProps) {
     }
   };
 
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void trackName(val);
+  };
+
+  const pick = (r: GitHubRepo) => {
+    if (r.tracked) return;
+    setVal(r.name_with_owner);
+    void trackName(r.name_with_owner);
+  };
+
+  const needle = val.trim().toLowerCase();
+  const suggestions = (repos ?? [])
+    .filter((r) => r.name_with_owner.toLowerCase().includes(needle))
+    .slice(0, 50);
+
   return (
-    <form onSubmit={submit} style={{ width: "100%" }}>
+    <form ref={wrapRef} onSubmit={submit} style={{ width: "100%" }}>
       <div className="row" style={{ gap: 8 }}>
-        <span className="field-icon" style={{ flex: 1, maxWidth: 340 }}>
+        <span
+          className="field-icon"
+          style={{ flex: 1, maxWidth: 340, position: "relative" }}
+        >
           <I.github style={{ width: 15, height: 15 }} />
           <input
             className="input"
-            placeholder="owner/name"
+            placeholder="owner/name — or pick one of yours"
             value={val}
             disabled={busy}
+            autoComplete="off"
             onChange={(e) => {
               setVal(e.target.value);
+              setOpen(true);
               clearError();
+            }}
+            onFocus={() => {
+              setOpen(true);
+              void ensureRepos();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setOpen(false);
             }}
             aria-label="Add repository"
           />
+          {open && (loadingRepos || repos !== null) && (
+            <div className="repo-picker fade-in">
+              {loadingRepos ? (
+                <div className="msg">Loading your repositories…</div>
+              ) : suggestions.length === 0 ? (
+                <div className="msg">
+                  {repos && repos.length === 0
+                    ? "No repositories found for your account."
+                    : "No matching repositories."}
+                </div>
+              ) : (
+                suggestions.map((r) => (
+                  <button
+                    type="button"
+                    key={r.name_with_owner}
+                    className="opt"
+                    disabled={r.tracked}
+                    title={r.description || r.name_with_owner}
+                    onClick={() => pick(r)}
+                  >
+                    {r.is_private ? (
+                      <I.lock style={{ width: 14, height: 14, color: "var(--muted)" }} />
+                    ) : (
+                      <I.repo style={{ width: 14, height: 14, color: "var(--muted)" }} />
+                    )}
+                    <span className="nm">{r.name_with_owner}</span>
+                    {r.tracked && <span className="tag">Tracked</span>}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </span>
         <button className="btn primary" type="submit" disabled={busy}>
           {busy ? (

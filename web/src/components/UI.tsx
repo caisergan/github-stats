@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, ReactNode } from "react";
+import React, { useState, useRef, useEffect, useId, ReactNode } from "react";
 import { I } from "./Icons";
 
 export interface OptionItem {
@@ -70,21 +70,99 @@ interface SelectProps {
   onChange: (val: string) => void;
 }
 
+/**
+ * A custom dropdown that replaces the native <select>. The native control can't
+ * style its open option list (it falls back to the OS popup), so this renders a
+ * design-system popover instead. Drop-in: same {value, options, onChange} props.
+ * Closes on outside click / Escape, supports arrow-key navigation, and marks the
+ * current value with a check — matching the app's Menu popover conventions.
+ */
 export function Select({ value, options, onChange }: SelectProps) {
+  const opts = options.map((o) =>
+    typeof o === "string" ? { value: o, label: o } : o,
+  );
+  const selected = opts.find((o) => o.value === value);
+  const selectedIdx = opts.findIndex((o) => o.value === value);
+
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(selectedIdx);
+  const ref = useRef<HTMLSpanElement>(null);
+  const baseId = useId();
+  const optId = (i: number) => `${baseId}-opt-${i}`;
+
+  // Close on outside click (same pattern as Menu).
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  // Highlight the current value each time the menu opens.
+  useEffect(() => {
+    if (open) setActive(selectedIdx >= 0 ? selectedIdx : 0);
+  }, [open, selectedIdx]);
+
+  const choose = (val: string) => {
+    onChange(val);
+    setOpen(false);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      setOpen(false);
+    } else if (!open && ["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) {
+      e.preventDefault();
+      setOpen(true);
+    } else if (open && e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((a) => Math.min(opts.length - 1, a + 1));
+    } else if (open && e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((a) => Math.max(0, a - 1));
+    } else if (open && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      if (active >= 0 && active < opts.length) choose(opts[active].value);
+    }
+  };
+
   return (
-    <span className="select">
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
-        {options.map((o) => {
-          const val = typeof o === "string" ? o : o.value;
-          const label = typeof o === "string" ? o : o.label;
-          return (
-            <option key={val} value={val}>
-              {label}
-            </option>
-          );
-        })}
-      </select>
-      <I.chevDown className="chev" style={{ width: 14, height: 14 }} />
+    <span className="dropdown" ref={ref}>
+      <button
+        type="button"
+        className={"dd-trigger" + (open ? " open" : "")}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={onKeyDown}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-activedescendant={open && active >= 0 ? optId(active) : undefined}
+      >
+        <span className="dd-value">{selected ? selected.label : ""}</span>
+        <I.chevDown className="dd-chev" style={{ width: 14, height: 14 }} />
+      </button>
+      {open && (
+        <div className="dd-menu fade-in" role="listbox">
+          {opts.map((o, i) => (
+            <button
+              key={o.value}
+              id={optId(i)}
+              type="button"
+              role="option"
+              aria-selected={o.value === value}
+              className={"dd-opt" + (i === active ? " active" : "")}
+              onClick={() => choose(o.value)}
+              onMouseEnter={() => setActive(i)}
+            >
+              {o.value === value && (
+                <I.check className="dd-check" style={{ width: 14, height: 14 }} />
+              )}
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
     </span>
   );
 }

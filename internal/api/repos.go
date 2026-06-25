@@ -119,6 +119,54 @@ func (s *Server) addRepo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toRepoJSON(meta, repoID, ss))
 }
 
+// githubRepoJSON is one suggestion in the "track repo" picker.
+type githubRepoJSON struct {
+	FullName    string `json:"name_with_owner"`
+	IsPrivate   bool   `json:"is_private"`
+	Description string `json:"description"`
+	Tracked     bool   `json:"tracked"`
+}
+
+// listGitHubRepos handles GET /api/github/repos: the signed-in user's own GitHub
+// repositories (via their stored credential), each flagged whether it's already
+// tracked — so the Track-repo form can offer a pick list instead of free typing.
+func (s *Server) listGitHubRepos(w http.ResponseWriter, r *http.Request) {
+	u, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	client, err := s.userClient(r, u.ID)
+	if err != nil {
+		http.Error(w, "no github credential", http.StatusInternalServerError)
+		return
+	}
+	repos, err := client.ListViewerRepos(r.Context())
+	if err != nil {
+		http.Error(w, "github fetch failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	tracked, err := s.store.ListTrackedRepos(r.Context(), u.ID)
+	if err != nil {
+		http.Error(w, "lookup failed", http.StatusInternalServerError)
+		return
+	}
+	trackedSet := make(map[string]bool, len(tracked))
+	for _, t := range tracked {
+		trackedSet[t.FullName] = true
+	}
+	out := make([]githubRepoJSON, 0, len(repos))
+	for _, gr := range repos {
+		out = append(out, githubRepoJSON{
+			FullName:    gr.NameWithOwner,
+			IsPrivate:   gr.IsPrivate,
+			Description: gr.Description,
+			Tracked:     trackedSet[gr.NameWithOwner],
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // listRepos handles GET /api/repos: the caller's tracked repos with sync status.
 func (s *Server) listRepos(w http.ResponseWriter, r *http.Request) {
 	u, ok := auth.UserFromContext(r.Context())

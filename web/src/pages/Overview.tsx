@@ -4,13 +4,13 @@ import { Select } from "../components/UI";
 import { Kpi, AddRepoForm } from "../components/Components";
 import RepoCard from "../components/RepoCard";
 import { RateLimitBanner } from "../components/RateLimitBanner";
-import { CollectionManager } from "../components/CollectionManager";
 import { useCollections } from "../hooks/useCollections";
 import { useAsync } from "../hooks/useAsync";
 import {
   fetchRateLimit,
   fetchOverview,
   fetchMetrics,
+  refreshRepo,
   exportCollectionURL,
   type RateLimit,
   type Repo,
@@ -35,6 +35,7 @@ export default function Overview({ repos, onAdd }: OverviewProps) {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("activity");
   const [status, setStatus] = useState("all");
+  const [refreshingAll, setRefreshingAll] = useState(false);
 
   // M6: live rate-limit snapshot + collections (from the JSON API).
   const cols = useCollections();
@@ -67,6 +68,18 @@ export default function Overview({ repos, onAdd }: OverviewProps) {
   }, [ids]);
   const overviews = ovState.data?.overviews ?? {};
   const sparks = ovState.data?.sparks ?? {};
+
+  // Queue a delta refresh for every tracked repo, then refetch the headline data.
+  async function refreshAll() {
+    if (refreshingAll || repos.length === 0) return;
+    setRefreshingAll(true);
+    try {
+      await Promise.all(repos.map((r) => refreshRepo(r.id).catch(() => {})));
+      ovState.reload();
+    } finally {
+      setRefreshingAll(false);
+    }
+  }
 
   const filtered = useMemo(() => {
     let list = repos.filter(
@@ -193,7 +206,21 @@ export default function Overview({ repos, onAdd }: OverviewProps) {
             ]}
           />
         </span>
-        <CollectionManager onCreate={cols.create} />
+        <button
+          className="btn"
+          onClick={refreshAll}
+          disabled={refreshingAll || repos.length === 0}
+          title="Queue a refresh for every tracked repository"
+        >
+          <I.refresh
+            style={
+              refreshingAll
+                ? { animation: "spin 1s linear infinite", width: 15, height: 15 }
+                : { width: 15, height: 15 }
+            }
+          />
+          {refreshingAll ? "Refreshing…" : "Refresh all"}
+        </button>
       </div>
 
       {filtered.length === 0 ? (

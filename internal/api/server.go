@@ -55,6 +55,7 @@ func NewServer(cfg config.Config, st *store.Store, authSvc *auth.Service, engine
 			pr.Get("/me", s.me)
 			pr.Post("/repos", s.addRepo)
 			pr.Get("/repos", s.listRepos)
+			pr.Get("/github/repos", s.listGitHubRepos)
 			pr.Delete("/repos/{id}", s.untrackRepo)
 			pr.Post("/repos/{id}/refresh", s.refreshRepo)
 			pr.Post("/repos/{id}/load-all-commits", s.loadAllCommits)

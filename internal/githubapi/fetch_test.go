@@ -66,6 +66,34 @@ func TestFetchRepoMeta(t *testing.T) {
 	}
 }
 
+func TestListViewerRepos(t *testing.T) {
+	srv := httptest.NewServer(gqlResponder(t, map[string]string{
+		"viewer": `{"data":{"viewer":{"repositories":{
+			"pageInfo":{"endCursor":"","hasNextPage":false},
+			"nodes":[
+				{"nameWithOwner":"octocat/hello","isPrivate":false,"description":"hi"},
+				{"nameWithOwner":"octocat/secret","isPrivate":true,"description":""}
+			]
+		}},"rateLimit":{"cost":1,"remaining":4999,"resetAt":"2026-04-01T13:00:00Z"}}}`,
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv.URL, "http://unused")
+
+	repos, err := c.ListViewerRepos(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("repos = %d, want 2", len(repos))
+	}
+	if repos[0].NameWithOwner != "octocat/hello" || repos[0].IsPrivate {
+		t.Fatalf("repos[0] = %+v", repos[0])
+	}
+	if repos[1].NameWithOwner != "octocat/secret" || !repos[1].IsPrivate {
+		t.Fatalf("repos[1] = %+v", repos[1])
+	}
+}
+
 func TestFetchCommitsPage(t *testing.T) {
 	srv := httptest.NewServer(gqlResponder(t, map[string]string{
 		"history": `{"data":{"repository":{"ref":{"target":{"history":{

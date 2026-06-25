@@ -3,13 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Apply the persisted theme to <html> BEFORE first paint, so reloading in
+      // dark mode doesn't flash the light default background. Mirrors getTheme()
+      // in src/theme.ts (key "gs_theme", default "dark"). Must stay a classic,
+      // synchronous script (no type=module / defer) so it runs during head parse.
+      (function () {
+        try {
+          var t = localStorage.getItem("gs_theme");
+          document.documentElement.setAttribute(
+            "data-theme",
+            t === "light" ? "light" : "dark"
+          );
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>GitHub Stats — Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/assets/index-B-7GE5lR.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Cu_vQ1CA.css">
+    <script type="module" crossorigin src="/assets/index-72UBr9Cv.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DlhEHF46.css">
   </head>
   <body>
     <div id="root"></div>

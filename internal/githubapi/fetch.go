@@ -454,3 +454,61 @@ type pageInfo struct {
 	EndCursor   string `json:"endCursor"`
 	HasNextPage bool   `json:"hasNextPage"`
 }
+
+// --- Viewer repositories (for the "track repo" picker) ---------------------
+
+// ViewerRepo is one of the signed-in user's accessible repositories.
+type ViewerRepo struct {
+	NameWithOwner string `json:"nameWithOwner"`
+	IsPrivate     bool   `json:"isPrivate"`
+	Description   string `json:"description"`
+}
+
+const listViewerReposQuery = `
+query($after: String) {
+  viewer {
+    repositories(first: 100, after: $after,
+      orderBy: {field: PUSHED_AT, direction: DESC},
+      affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]) {
+      pageInfo { endCursor hasNextPage }
+      nodes { nameWithOwner isPrivate description }
+    }
+  }
+  rateLimit { cost remaining resetAt }
+}`
+
+// maxViewerRepoPages bounds how many pages of the viewer's repos we page through
+// (100 per page, most-recently-pushed first) so a user with thousands of repos
+// doesn't stall the picker. The manual owner/name input remains a fallback.
+const maxViewerRepoPages = 5
+
+// ListViewerRepos returns the signed-in user's accessible repositories, newest
+// push first, paging up to maxViewerRepoPages.
+func (c *Client) ListViewerRepos(ctx context.Context) ([]ViewerRepo, error) {
+	var all []ViewerRepo
+	after := ""
+	for page := 0; page < maxViewerRepoPages; page++ {
+		var data struct {
+			Viewer struct {
+				Repositories struct {
+					PageInfo pageInfo     `json:"pageInfo"`
+					Nodes    []ViewerRepo `json:"nodes"`
+				} `json:"repositories"`
+			} `json:"viewer"`
+			RateLimit RateLimit `json:"rateLimit"`
+		}
+		vars := map[string]any{}
+		if after != "" {
+			vars["after"] = after
+		}
+		if err := c.graphql(ctx, listViewerReposQuery, vars, &data); err != nil {
+			return nil, err
+		}
+		all = append(all, data.Viewer.Repositories.Nodes...)
+		if !data.Viewer.Repositories.PageInfo.HasNextPage {
+			break
+		}
+		after = data.Viewer.Repositories.PageInfo.EndCursor
+	}
+	return all, nil
+}

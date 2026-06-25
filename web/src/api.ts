@@ -152,6 +152,18 @@ export async function loadAllCommits(id: number): Promise<void> {
     throw await asError(res, `/api/repos/${id}/load-all-commits`);
 }
 
+/** A repository the signed-in user can access on GitHub (Track-repo picker). */
+export interface GitHubRepo {
+  name_with_owner: string;
+  is_private: boolean;
+  description: string;
+  tracked: boolean; // already tracked in this workspace
+}
+
+export function fetchMyRepos(): Promise<GitHubRepo[]> {
+  return getJSON<GitHubRepo[]>("/api/github/repos");
+}
+
 // ---------------------------------------------------------------------------
 // Metrics / overview / latest (M4)
 // ---------------------------------------------------------------------------

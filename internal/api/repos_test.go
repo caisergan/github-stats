@@ -354,6 +354,58 @@ func TestRepoSyncStatusReportsActiveJob(t *testing.T) {
 	}
 }
 
+func TestListGitHubReposFlagsTracked(t *testing.T) {
+	// Fake GitHub returns the viewer's repositories.
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"viewer":{"repositories":{
+			"pageInfo":{"endCursor":"","hasNextPage":false},
+			"nodes":[
+				{"nameWithOwner":"neo/alpha","isPrivate":false,"description":"a"},
+				{"nameWithOwner":"neo/beta","isPrivate":true,"description":"b"}
+			]
+		}},"rateLimit":{"cost":1,"remaining":4999,"resetAt":"2026-04-01T13:00:00Z"}}}`))
+	}))
+	defer gh.Close()
+
+	srv, st, _ := serverWithGitHub(t, gh.URL)
+	ctx := context.Background()
+	// Track one of the two so it comes back flagged.
+	repoID, _ := st.UpsertRepo(ctx, &store.Repo{GitHubID: 1, FullName: "neo/alpha", DefaultBranch: "main"})
+	st.TrackRepo(ctx, 1, repoID)
+
+	rec := authedGet(t, srv, st, "/api/github/repos")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var out []struct {
+		FullName  string `json:"name_with_owner"`
+		IsPrivate bool   `json:"is_private"`
+		Tracked   bool   `json:"tracked"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("repos = %d, want 2", len(out))
+	}
+	tracked := map[string]bool{}
+	priv := map[string]bool{}
+	for _, r := range out {
+		tracked[r.FullName] = r.Tracked
+		priv[r.FullName] = r.IsPrivate
+	}
+	if !tracked["neo/alpha"] {
+		t.Errorf("neo/alpha should be flagged tracked")
+	}
+	if tracked["neo/beta"] {
+		t.Errorf("neo/beta should NOT be tracked")
+	}
+	if !priv["neo/beta"] {
+		t.Errorf("neo/beta should be private")
+	}
+}
+
 func TestRefreshRejectsUntrackedRepo(t *testing.T) {
 	srv, st, cookie := serverWithGitHub(t, "http://unused")
 	ctx := context.Background()

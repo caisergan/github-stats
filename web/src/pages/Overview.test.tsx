@@ -64,7 +64,7 @@ describe("Overview page", () => {
     const onAdd = vi.fn();
     renderPage(REPOS, onAdd);
 
-    const input = screen.getByPlaceholderText("owner/name");
+    const input = screen.getByLabelText("Add repository");
     await userEvent.type(input, "a/b");
 
     const btn = screen.getByRole("button", { name: /track repo/i });
@@ -84,7 +84,7 @@ describe("Overview page", () => {
       .mockRejectedValue(new Error("fetch repo failed: graphql: empty data"));
     renderPage(REPOS, onAdd);
 
-    const input = screen.getByPlaceholderText("owner/name");
+    const input = screen.getByLabelText("Add repository");
     await userEvent.type(input, "caisergan/trade-station");
     await userEvent.click(screen.getByRole("button", { name: /track repo/i }));
 
@@ -100,7 +100,7 @@ describe("Overview page", () => {
     renderPage(REPOS, onAdd);
 
     await userEvent.type(
-      screen.getByPlaceholderText("owner/name"),
+      screen.getByLabelText("Add repository"),
       "caisergan/trade-station",
     );
     await userEvent.click(screen.getByRole("button", { name: /track repo/i }));
